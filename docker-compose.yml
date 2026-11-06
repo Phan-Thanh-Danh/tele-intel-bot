@@ -33,6 +33,9 @@ services:
       dockerfile: Dockerfile
     container_name: tele_intel_bot
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     env_file:
       - .env
     environment:

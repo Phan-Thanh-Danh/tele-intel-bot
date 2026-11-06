@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("dotenv").config({ debug: false });
 const cron = require("node-cron");
 const { pool, closePool } = require("./lib/db");
 const {
