@@ -16,7 +16,10 @@ const {
   upsertTopicState,
   recordSourceFeedback,
   getUserLanguage,
-  setUserLanguage
+  setUserLanguage,
+  addCustomFeed,
+  getCustomFeeds,
+  deleteCustomFeed
 } = require("./lib/db_operations");
 const { SUPPORTED_LANGUAGES, t } = require("./lib/i18n");
 
@@ -368,6 +371,78 @@ function createBot() {
 
   bot.command("list", async (ctx) => {
     await handleListSubscriptions(ctx);
+  });
+
+  // Custom RSS Feed Management Commands:
+  // Usage: /addfeed <url> [topic] [name]
+  bot.command("addfeed", async (ctx) => {
+    const rawText = ctx.message?.text?.replace(/^\/addfeed\s*/i, "").trim();
+    if (!rawText) {
+      await ctx.reply(
+        "ℹ️ <b>Add Custom RSS Feed:</b>\n\nUsage:\n<code>/addfeed &lt;url&gt; [topic] [name]</code>\n\n<i>Example:</i>\n<code>/addfeed https://vnexpress.net/rss/kinh-doanh.rss kinh_te VnExpress</code>",
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    const parts = rawText.split(/\s+/);
+    const feedUrl = parts[0];
+    const topic = parts[1] || "general";
+    const feedName = parts.slice(2).join(" ") || new URL(feedUrl).hostname.replace(/^www\./, "");
+
+    if (!feedUrl.startsWith("http://") && !feedUrl.startsWith("https://")) {
+      await ctx.reply("❌ Invalid URL. Please provide a full URL starting with http:// or https://");
+      return;
+    }
+
+    try {
+      await addCustomFeed({
+        chatId: ctx.chat.id,
+        feedUrl,
+        feedName,
+        topic
+      });
+      await ctx.reply(
+        `✅ <b>Custom RSS Feed Added!</b>\n\n• <b>Name:</b> ${escapeHtml(feedName)}\n• <b>Topic:</b> ${escapeHtml(topic)}\n• <b>URL:</b> <code>${escapeHtml(feedUrl)}</code>`,
+        { parse_mode: "HTML" }
+      );
+    } catch (err) {
+      await ctx.reply(`❌ Failed to save feed: <code>${escapeHtml(err.message)}</code>`, { parse_mode: "HTML" });
+    }
+  });
+
+  // List all custom feeds
+  bot.command(["listfeeds", "feeds"], async (ctx) => {
+    const feeds = await getCustomFeeds(ctx.chat.id);
+    if (feeds.length === 0) {
+      await ctx.reply("📋 <b>No custom RSS feeds configured.</b>\n\nUse <code>/addfeed &lt;url&gt; [topic]</code> to add one.", {
+        parse_mode: "HTML"
+      });
+      return;
+    }
+
+    let text = "📋 <b>ACTIVE CUSTOM RSS FEEDS:</b>\n\n";
+    const kb = new InlineKeyboard();
+
+    feeds.forEach((f, idx) => {
+      text += `<b>${idx + 1}. ${escapeHtml(f.feed_name || "Feed")}</b> [Topic: <code>${escapeHtml(f.topic)}</code>]\n`;
+      text += `🔗 <code>${escapeHtml(f.feed_url)}</code>\n\n`;
+      kb.text(`🗑 Delete #${idx + 1}`, `delfeed_${f.id}`).row();
+    });
+
+    await ctx.reply(text, { parse_mode: "HTML", reply_markup: kb });
+  });
+
+  // Callback to delete custom feed
+  bot.callbackQuery(/^delfeed_(\d+)$/, async (ctx) => {
+    const feedId = parseInt(ctx.match[1], 10);
+    const deleted = await deleteCustomFeed(feedId, ctx.chat.id);
+    if (deleted) {
+      await ctx.answerCallbackQuery({ text: "Feed deleted successfully!" });
+      await ctx.editMessageText("✅ <i>Custom RSS feed removed.</i>", { parse_mode: "HTML" }).catch(() => {});
+    } else {
+      await ctx.answerCallbackQuery({ text: "Feed not found or already deleted." });
+    }
   });
 
   // Inline Button Callbacks

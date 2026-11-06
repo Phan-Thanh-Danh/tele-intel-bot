@@ -193,6 +193,8 @@ All bot interactions occur through Telegram commands and interactive keyboards.
 | `/instant` | Prompts for any keyword, entity, or topic for immediate intelligence research |
 | `/add` | Launches interactive conversation to create a scheduled digest |
 | `/list` | Displays active subscriptions with toggles and delete controls |
+| `/addfeed` | Adds a custom RSS feed URL: `/addfeed <url> [topic] [name]` |
+| `/listfeeds` | Lists and manages active custom RSS feeds with one-click deletion |
 | `/lang` | Opens the language switcher keyboard |
 | `/help` | Displays system help and guidance |
 
@@ -218,6 +220,10 @@ tele-intel-bot/
 │   ├── scraper.js            # RSS and Reddit feed ingestion
 │   ├── sources_config.js     # Media source reputation lists
 │   └── synthesizer.js        # AI synthesis and OpenRouter cascade
+├── test/                     # Automated test suite
+│   ├── chunker.test.js
+│   ├── i18n.test.js
+│   └── synthesizer.test.js
 ├── bot.js                    # Telegram bot handlers and UI workflows
 ├── index.js                  # Process entry point and background cron pipelines
 ├── init.sql                  # Database schema initialization script
@@ -254,9 +260,10 @@ docker-compose up -d --build bot
 
 ## Data Model
 
-The database (`tele_intel_bot`) consists of 6 primary tables:
+The database (`tele_intel_bot`) consists of 7 primary tables:
 
 - **`subscriptions`**: User scheduled topics, delivery hour, frequency, and active status.
+- **`custom_feeds`**: User-configured custom RSS feeds (`feed_url`, `feed_name`, `topic`).
 - **`raw_articles`**: Ingested articles with composite uniqueness on `(topic, link)`.
 - **`shift_digests`**: Staged JSON payloads for scheduled hourly delivery.
 - **`user_settings`**: Per-user preferences (e.g., chosen UI and synthesis language).
@@ -276,8 +283,8 @@ See [docs/DATABASE.md](docs/DATABASE.md) for the complete schema and indexing st
 - [x] Persistent multi-language interface and report generation (9 languages)
 - [x] Zero-trust admin authorization lock
 - [x] Automated 3-day data retention cleanup
-- [ ] TODO: Add custom RSS feed manager command (`/addfeed`)
-- [ ] TODO: Implement automated test suite in `package.json`
+- [x] Custom RSS feed manager (`/addfeed`, `/listfeeds`)
+- [x] Automated unit test suite via `node:test` (`npm test`)
 
 ---
 

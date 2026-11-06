@@ -15,10 +15,11 @@ const {
   deleteStaleArticles,
   getTopicHistory,
   upsertTopicState,
-  getUserLanguage
+  getUserLanguage,
+  getCustomFeeds
 } = require("./lib/db_operations");
 const { t } = require("./lib/i18n");
-const { scrapeTopic } = require("./lib/scraper");
+const { scrapeTopic, fetchRssFeed } = require("./lib/scraper");
 const { synthesizeArticles } = require("./lib/synthesizer");
 const { chunkDigestToPages, escapeHtml } = require("./lib/chunker");
 const { createBot } = require("./bot");
@@ -109,6 +110,24 @@ async function executeIngestJob() {
       }
       // Throttle 2,000 ms between topics to prevent IP rate-limiting
       await delay(2000);
+    }
+
+    // Ingest active custom RSS feeds
+    const customFeeds = await getCustomFeeds();
+    if (customFeeds.length > 0) {
+      console.log(`[Ingest Job] Fetching ${customFeeds.length} custom RSS feeds...`);
+      for (const feed of customFeeds) {
+        try {
+          const feedArticles = await fetchRssFeed(feed.feed_url, feed.topic || "general", feed.feed_name || "Custom RSS", 2);
+          if (feedArticles.length > 0) {
+            const inserted = await insertRawArticles(feedArticles);
+            console.log(`[Ingest Job] Inserted ${inserted} articles from custom feed "${feed.feed_name || feed.feed_url}".`);
+          }
+        } catch (fErr) {
+          console.warn(`[Ingest Job] Failed to ingest custom feed ${feed.feed_url}:`, fErr.message);
+        }
+        await delay(1000);
+      }
     }
   } catch (error) {
     console.error("[Ingest Job Exception]:", error);
