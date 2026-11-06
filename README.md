@@ -5,9 +5,9 @@ Automated news intelligence and multi-source synthesis bot for Telegram.
 ![tele-intel-bot Banner](docs/banner.png)
 
 ![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Docker Supported](https://img.shields.io/badge/docker-ready-blue)
 ![Database](https://img.shields.io/badge/mysql-8.0-orange)
-![Status](https://img.shields.io/badge/status-active-success)
 
 ## Table of Contents
 
@@ -300,7 +300,7 @@ See [docs/DATABASE.md](docs/DATABASE.md) for the complete schema and indexing st
 
 ## License
 
-TODO: add a license
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
