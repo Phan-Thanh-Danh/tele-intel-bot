@@ -11,7 +11,8 @@ Every module and function must execute exactly one unambiguous responsibility:
 - **`lib/db.js`**: Connection pool creation and lifecycle only. No queries or business operations.
 - **`lib/db_operations.js`**: Pure SQL query abstraction. No HTTP calls, cron references, or Telegram formatting logic.
 - **`lib/scraper.js`**: Feed fetching and DOM/JSON extraction only. Never calls the database directly; returns structured records to callers.
-- **`lib/gemini.js`**: Prompt composition, SDK communication, and schema enforcement only.
+- **`lib/synthesizer.js`**: Prompt composition, OpenRouter/LLM cascade communication, and schema enforcement only.
+- **`lib/i18n.js`**: Multi-language translation dictionaries and language detection helpers only.
 - **`lib/chunker.js`**: Text processing, character counting, entity escaping, and HTML boundary splitting only.
 - **`bot.js`**: Telegram UI, conversation flow handling, and user command routing only.
 - **`index.js`**: Bootstrap sequence, cron schedule registration, and top-level process supervision only.
@@ -82,13 +83,13 @@ Every module and function must execute exactly one unambiguous responsibility:
   ```
 
 ### 2.3. Secret & Configuration Management
-- Secrets (`BOT_TOKEN`, `GEMINI_API_KEY`, `ADMIN_CHAT_ID`, `MYSQL_PASSWORD`) must never be hardcoded or checked into version control.
+- Secrets (`BOT_TOKEN`, `OPENROUTER_API_KEY`, `ADMIN_CHAT_ID`, `MYSQL_PASSWORD`) must never be hardcoded or checked into version control.
 - Enforce pre-flight validation on boot. If any required environment variable is missing, fail fast with a fatal log:
   ```javascript
   const REQUIRED_ENVIRONMENT_VARIABLES = [
     "BOT_TOKEN",
     "ADMIN_CHAT_ID",
-    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
     "MYSQL_HOST",
     "MYSQL_USER",
     "MYSQL_PASSWORD",
@@ -201,7 +202,7 @@ Every module and function must execute exactly one unambiguous responsibility:
   ```
 
 ### 4.2. Active Admin Failure Notifications
-- When critical synthesis failures occur (e.g., Gemini API quota exhaustion or database disconnects during shift preparation), the system must alert the user directly on Telegram so outages do not go unnoticed:
+- When critical synthesis failures occur (e.g., API quota exhaustion or database disconnects during shift preparation), the system must alert the user directly on Telegram so outages do not go unnoticed:
   ```javascript
   async function alertAdminOfFailure(bot, adminChatId, shiftHour, topic, errorMessage) {
     const message = `⚠️ <b>[System Warning]</b> Synthesis failed for ca <code>${shiftHour}:00</code> (Topic: <i>${escapeHtml(topic)}</i>).\n\n<b>Error:</b> <code>${escapeHtml(errorMessage)}</code>`;

@@ -138,6 +138,41 @@ CREATE TABLE IF NOT EXISTS shift_digests (
     FOREIGN KEY (subscription_id)
     REFERENCES subscriptions(id)
     ON DELETE CASCADE
+-- ============================================================================
+-- Table: user_settings
+-- Purpose: Persistent user-level configurations (e.g., UI & Report Language).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS user_settings (
+  chat_id BIGINT PRIMARY KEY,
+  language_code VARCHAR(10) NOT NULL DEFAULT 'en',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- Table: source_reputation
+-- Purpose: Records feedback metrics and trust ratings for cited news sources.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS source_reputation (
+  domain VARCHAR(191) PRIMARY KEY,
+  trust_score INT NOT NULL DEFAULT 100,
+  confirmed_count INT NOT NULL DEFAULT 0,
+  disputed_count INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- Table: feedback_logs
+-- Purpose: Logs user feedback on synthesized intelligence reports.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS feedback_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  chat_id BIGINT NOT NULL,
+  event_key VARCHAR(191) NOT NULL,
+  domain VARCHAR(191) NOT NULL,
+  feedback_type ENUM('CONFIRMED', 'DISPUTED') NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_feedback_domain (domain)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
@@ -147,7 +182,7 @@ CREATE TABLE IF NOT EXISTS shift_digests (
 
 ### 4.1. `subscriptions` Table
 * `topic`: Normalized via application runtime using `.trim().toLowerCase()`. Never store raw unformatted user strings to prevent case-sensitivity splits.
-* `prompt_guidance`: Optional instruction appended to the Gemini system prompt for this specific topic (e.g., *"Focus on transfer rumors and injury reports"* vs. *"Emphasize throughput benchmarks"*).
+* `prompt_guidance`: Optional instruction appended to the AI system prompt for this specific topic (e.g., *"Focus on transfer rumors and injury reports"* vs. *"Emphasize throughput benchmarks"*).
 * `schedule_type`:
   * `'recurring'`: Evaluates `days_of_week`.
   * `'specific_date'`: Evaluates `specific_date`. When delivered, the application toggles `is_active = 0`.
@@ -161,7 +196,7 @@ CREATE TABLE IF NOT EXISTS shift_digests (
 * `pub_date`: Parsed release date normalized to `YYYY-MM-DD HH:MM:SS`.
 
 ### 4.3. `shift_digests` Table
-* `summary_json`: Stores structured output produced by Gemini conforming to the defined schema. Contains `{ overview: string, events: [...] }`.
+* `summary_json`: Stores structured output produced by the synthesis engine conforming to the defined schema. Contains `{ overview: string, events: [...] }`.
 * `uq_sub_delivery`: Prevents synthesis race conditions. If `synthesizeJob` runs twice or encounters transient execution delays, it overwrites or skips without creating duplicate notifications.
 * `is_sent`: State flag:
   * `0`: Synthesized and queued for broadcast.
