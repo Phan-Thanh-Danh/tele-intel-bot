@@ -1,7 +1,7 @@
 const { Bot, session, InlineKeyboard } = require("grammy");
 const { conversations, createConversation } = require("@grammyjs/conversations");
 const { scrapeTopic } = require("./lib/scraper");
-const { synthesizeArticles } = require("./lib/gemini");
+const { synthesizeArticles } = require("./lib/synthesizer");
 const {
   chunkInstantResearchToPages,
   escapeHtml

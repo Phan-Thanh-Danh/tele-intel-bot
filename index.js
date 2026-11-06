@@ -17,7 +17,7 @@ const {
   upsertTopicState
 } = require("./lib/db_operations");
 const { scrapeTopic } = require("./lib/scraper");
-const { synthesizeArticles } = require("./lib/gemini");
+const { synthesizeArticles } = require("./lib/synthesizer");
 const { chunkDigestToPages, escapeHtml } = require("./lib/chunker");
 const { createBot } = require("./bot");
 
