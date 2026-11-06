@@ -11,7 +11,10 @@ const {
   getAllSubscriptions,
   getSubscriptionById,
   toggleSubscriptionStatus,
-  deleteSubscription
+  deleteSubscription,
+  getTopicHistory,
+  upsertTopicState,
+  recordSourceFeedback
 } = require("./lib/db_operations");
 
 /**
@@ -67,6 +70,18 @@ function createBot() {
         await delay((waitSeconds + 1) * 1000);
         return await bot.api.sendMessage(chatId, htmlContent, defaultOptions);
       }
+      // If Telegram fails to parse HTML entities, fallback to clean plain text
+      if (
+        error?.message?.includes("can't parse entities") ||
+        error?.description?.includes("can't parse entities")
+      ) {
+        console.warn(`[Telegram HTML Fallback] Entity parsing failed, sending plain text: ${error.message}`);
+        const plainText = htmlContent.replace(/<[^>]*>?/gm, "");
+        return await bot.api.sendMessage(chatId, plainText, {
+          ...extra,
+          disable_web_page_preview: true
+        });
+      }
       throw error;
     }
   }
@@ -115,12 +130,22 @@ function createBot() {
       await bot.api.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
-        `🤖 Đã thu thập được <b>${articles.length}</b> bài viết. Đang chuyển tới Gemini để phân tích...`,
+        `🤖 Đã thu thập được <b>${articles.length}</b> bài viết từ mạng lưới báo chí quốc tế. Đang phân tích chiến lược đa cực qua DeepSeek V3...`,
         { parse_mode: "HTML" }
       ).catch(() => {});
 
-      // Step 2: Gemini Synthesis
-      const summary = await conversation.external(() => synthesizeArticles(topic, articles));
+      // Step 2: Fetch Topic History (Event Ledger) & DeepSeek Synthesis
+      const topicHistory = await conversation.external(() => getTopicHistory(topic));
+      const summary = await conversation.external(() => synthesizeArticles(topic, articles, null, topicHistory));
+
+      // Update Event Ledger with new event states
+      if (Array.isArray(summary.events) && summary.events.length > 0) {
+        for (const evt of summary.events.slice(0, 3)) {
+          const key = (evt.title || "general").slice(0, 80);
+          const state = evt.hard_facts || evt.details || evt.title;
+          await conversation.external(() => upsertTopicState(topic, key, state)).catch(() => {});
+        }
+      }
 
       // Step 3: Chunk and send
       const pages = chunkInstantResearchToPages(topic, summary);
@@ -129,7 +154,14 @@ function createBot() {
       await bot.api.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
 
       for (let i = 0; i < pages.length; i++) {
-        await sendSafeMessage(ctx.chat.id, pages[i]);
+        const isLastPage = (i === pages.length - 1);
+        const replyMarkup = isLastPage
+          ? new InlineKeyboard()
+              .text("👍 Xác nhận chuẩn xác", `fb:good:${topic.slice(0, 30)}`)
+              .text("⚠️ Báo cáo tin sai", `fb:bad:${topic.slice(0, 30)}`)
+          : undefined;
+
+        await sendSafeMessage(ctx.chat.id, pages[i], replyMarkup ? { reply_markup: replyMarkup } : {});
         if (i < pages.length - 1) {
           await delay(1000);
         }
@@ -162,8 +194,8 @@ function createBot() {
     }
 
     await ctx.reply(
-      `<b>Bước 2/4:</b> Nhập hướng dẫn phân tích riêng cho Gemini (Topic Guidance).\n\n` +
-      `<i>Ví dụ: "Tập trung tin tức chuyển nhượng", "Chú trọng cập nhật bảo mật CVE"...</i>\n` +
+      `<b>Bước 2/4:</b> Nhập hướng dẫn phân tích riêng cho AI (Topic Guidance).\n\n` +
+      `<i>Ví dụ: "Đối chiếu góc nhìn Mỹ và Châu Âu", "Chú trọng cập nhật bán dẫn & xuất khẩu"...</i>\n` +
       `Hoặc gửi <code>skip</code> / <code>bo qua</code> để bỏ qua bước này:`,
       { parse_mode: "HTML" }
     );
@@ -272,7 +304,7 @@ function createBot() {
   bot.command("start", async (ctx) => {
     const welcomeText =
       `🛡️ <b>HỆ THỐNG TÌNH BÁO & TỔNG HỢP TIN TỨC TỰ ĐỘNG</b>\n\n` +
-      `Xin chào Admin! Hệ thống đang hoạt động 24/7 để giám sát, thu thập và phân tích dữ liệu từ Google News và Reddit qua Gemini AI.\n\n` +
+      `Xin chào Admin! Hệ thống đang hoạt động 24/7 để giám sát, thu thập và phân tích dữ liệu từ mạng lưới báo chí 9 cường quốc qua DeepSeek OSINT v3.\n\n` +
       `Chọn một tính năng dưới đây để bắt đầu:`;
 
     await ctx.reply(welcomeText, {
@@ -326,7 +358,7 @@ function createBot() {
     await ctx.reply(
       `💡 <b>Cơ chế hoạt động của Bot:</b>\n` +
       `- <b>Cào dữ liệu:</b> Tự động cào mỗi 30 phút một lần.\n` +
-      `- <b>Phân tích:</b> Trước mỗi giờ ca phát hành (H-1), Gemini sẽ tổng hợp bài viết mới.\n` +
+      `- <b>Phân tích:</b> Trước mỗi giờ ca phát hành (H-1), AI sẽ tổng hợp và tam giác hóa dữ kiện bài viết mới.\n` +
       `- <b>Gửi tin:</b> Đúng đầu giờ ca, hệ thống chia nhỏ trang HTML và phát hành cho bạn.\n` +
       `- <b>An toàn:</b> Không bao giờ trùng tin giữa các ca nhờ Watermark <code>last_delivered_at</code>.`,
       { parse_mode: "HTML" }
@@ -358,6 +390,37 @@ function createBot() {
     await deleteSubscription(subId);
     await ctx.answerCallbackQuery({ text: "Đã xóa lịch theo dõi thành công!" });
     await handleListSubscriptions(ctx, true);
+  });
+
+  // Layer 11: Dynamic Feedback Loop Handler
+  bot.callbackQuery(/^fb:(good|bad):(.+)$/, async (ctx) => {
+    const isGood = ctx.match[1] === "good";
+    const topicKey = ctx.match[2];
+    const feedbackType = isGood ? "CONFIRMED" : "DISPUTED";
+
+    try {
+      await recordSourceFeedback(ctx.chat.id, topicKey, topicKey, feedbackType);
+      if (isGood) {
+        await ctx.answerCallbackQuery({
+          text: "✅ Cảm ơn bạn! Đã ghi nhận tín nhiệm cho các nguồn tin này.",
+          show_alert: false
+        });
+        await ctx.editMessageReplyMarkup({
+          reply_markup: new InlineKeyboard().text("✅ Đã ghi nhận chuẩn xác", "noop")
+        }).catch(() => {});
+      } else {
+        await ctx.answerCallbackQuery({
+          text: "⚠️ Đã ghi nhận báo cáo sai lệch. Điểm tín nhiệm của nguồn tin đã được điều chỉnh giảm.",
+          show_alert: true
+        });
+        await ctx.editMessageReplyMarkup({
+          reply_markup: new InlineKeyboard().text("⚠️ Đã ghi nhận báo cáo lỗi", "noop")
+        }).catch(() => {});
+      }
+    } catch (err) {
+      console.error("[Feedback Loop Error]:", err);
+      await ctx.answerCallbackQuery({ text: "Lỗi ghi nhận phản hồi." }).catch(() => {});
+    }
   });
 
   /**

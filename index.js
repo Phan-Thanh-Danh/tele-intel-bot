@@ -1,5 +1,6 @@
 require("dotenv").config({ debug: false });
 const cron = require("node-cron");
+const { InlineKeyboard } = require("grammy");
 const { pool, closePool } = require("./lib/db");
 const {
   initDatabaseSchema,
@@ -11,7 +12,9 @@ const {
   getPendingDigests,
   markDigestSentWithTransaction,
   deactivateSpecificDateSubscription,
-  deleteStaleArticles
+  deleteStaleArticles,
+  getTopicHistory,
+  upsertTopicState
 } = require("./lib/db_operations");
 const { scrapeTopic } = require("./lib/scraper");
 const { synthesizeArticles } = require("./lib/gemini");
@@ -24,7 +27,6 @@ const { createBot } = require("./bot");
 const REQUIRED_ENVIRONMENT_VARIABLES = [
   "BOT_TOKEN",
   "ADMIN_CHAT_ID",
-  "GEMINI_API_KEY",
   "MYSQL_HOST",
   "MYSQL_USER",
   "MYSQL_PASSWORD",
@@ -36,6 +38,12 @@ for (const envKey of REQUIRED_ENVIRONMENT_VARIABLES) {
     console.error(`[Fatal Startup Error] Missing required environment variable: ${envKey}`);
     process.exit(1);
   }
+}
+
+// Ensure either OPENROUTER_API_KEY or GEMINI_API_KEY exists
+if (!process.env.OPENROUTER_API_KEY && !process.env.GEMINI_API_KEY) {
+  console.error("[Fatal Startup Error] Missing required API Key: OPENROUTER_API_KEY (or GEMINI_API_KEY)");
+  process.exit(1);
 }
 
 // ============================================================================
@@ -147,7 +155,17 @@ async function executeSynthesizeJob(bot, adminChatId) {
       console.log(`[Synthesis Job] Processing topic "${sub.topic}" for subscription #${sub.id}`);
       try {
         const articles = await getArticlesForTopicSince(sub.topic, sub.last_delivered_at, 30);
-        const summary = await synthesizeArticles(sub.topic, articles, sub.prompt_guidance);
+        const topicHistory = await getTopicHistory(sub.topic, 10);
+        const summary = await synthesizeArticles(sub.topic, articles, sub.prompt_guidance, topicHistory);
+
+        // Update event_ledger with latest synthesized states
+        if (Array.isArray(summary.events) && summary.events.length > 0) {
+          for (const evt of summary.events.slice(0, 3)) {
+            const key = (evt.title || "general").slice(0, 80);
+            const state = evt.hard_facts || evt.details || evt.title;
+            await upsertTopicState(sub.topic, key, state).catch(() => {});
+          }
+        }
 
         await upsertShiftDigest({
           subscriptionId: sub.id,
@@ -213,7 +231,14 @@ async function executeDispatchJob(sendSafeMessage) {
 
       // Send each page sequentially with 1,000 ms delay
       for (let i = 0; i < pages.length; i++) {
-        await sendSafeMessage(digest.chat_id, pages[i]);
+        const isLastPage = (i === pages.length - 1);
+        const replyMarkup = isLastPage
+          ? new InlineKeyboard()
+              .text("👍 Xác nhận chuẩn xác", `fb:good:${digest.topic.slice(0, 30)}`)
+              .text("⚠️ Báo cáo tin sai", `fb:bad:${digest.topic.slice(0, 30)}`)
+          : undefined;
+
+        await sendSafeMessage(digest.chat_id, pages[i], replyMarkup ? { reply_markup: replyMarkup } : {});
         if (i < pages.length - 1) {
           await delay(1000);
         }

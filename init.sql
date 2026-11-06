@@ -77,3 +77,54 @@ CREATE TABLE IF NOT EXISTS shift_digests (
     REFERENCES subscriptions(id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ============================================================================
+-- Table: event_ledger
+-- Purpose: Persistent state tracking and historical timeline for Delta (Δ) computation.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS event_ledger (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  topic VARCHAR(255) NOT NULL,
+  entity_key VARCHAR(100) NOT NULL,
+  current_state TEXT NOT NULL,
+  last_event_date DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  -- Constraints & Indexes
+  UNIQUE KEY uq_topic_entity (topic, entity_key),
+  INDEX idx_topic (topic)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ============================================================================
+-- Table: source_reputation
+-- Purpose: Dynamic trust score tracking per domain for Layer 11 Feedback Loop.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS source_reputation (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  domain VARCHAR(255) NOT NULL UNIQUE,
+  trust_score INT NOT NULL DEFAULT 100,
+  verified_reports_count INT NOT NULL DEFAULT 0,
+  false_reports_count INT NOT NULL DEFAULT 0,
+  current_tier TINYINT NOT NULL DEFAULT 2,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_domain_trust (domain, trust_score)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ============================================================================
+-- Table: feedback_logs
+-- Purpose: Stores user feedback interactions (Confirmed vs Disputed).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS feedback_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  chat_id BIGINT NOT NULL,
+  event_key VARCHAR(255) NOT NULL,
+  domain VARCHAR(255) NOT NULL,
+  feedback_type ENUM('CONFIRMED', 'DISPUTED') NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_feedback_domain (domain)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
