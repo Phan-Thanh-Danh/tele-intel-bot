@@ -14,12 +14,16 @@ const {
   deleteSubscription,
   getTopicHistory,
   upsertTopicState,
-  recordSourceFeedback
+  recordSourceFeedback,
+  getUserLanguage,
+  setUserLanguage
 } = require("./lib/db_operations");
+const { SUPPORTED_LANGUAGES, t } = require("./lib/i18n");
 
 /**
  * Creates and configures the Telegram Bot instance.
  * Adheres strictly to SRP: Telegram UI, conversation flow handling, and user command routing only.
+ * Full Multi-Language (i18n) Engine.
  */
 function createBot() {
   const botToken = process.env.BOT_TOKEN;
@@ -42,7 +46,7 @@ function createBot() {
       if (ctx.chat) {
         await ctx.reply("⛔ Unauthorized access. This is a private intelligence system.").catch(() => {});
       }
-      return; // Immediate halt: Do not proceed
+      return; // Immediate halt
     }
     await next();
   });
@@ -70,7 +74,6 @@ function createBot() {
         await delay((waitSeconds + 1) * 1000);
         return await bot.api.sendMessage(chatId, htmlContent, defaultOptions);
       }
-      // If Telegram fails to parse HTML entities, fallback to clean plain text
       if (
         error?.message?.includes("can't parse entities") ||
         error?.description?.includes("can't parse entities")
@@ -86,32 +89,54 @@ function createBot() {
     }
   }
 
+  // Helper: Builds Language Selection Keyboard
+  function buildLanguageKeyboard() {
+    const kb = new InlineKeyboard();
+    for (let i = 0; i < SUPPORTED_LANGUAGES.length; i += 2) {
+      const l1 = SUPPORTED_LANGUAGES[i];
+      const l2 = SUPPORTED_LANGUAGES[i + 1];
+      if (l2) {
+        kb.text(l1.label, `set_lang:${l1.code}`).text(l2.label, `set_lang:${l2.code}`).row();
+      } else {
+        kb.text(l1.label, `set_lang:${l1.code}`).row();
+      }
+    }
+    return kb;
+  }
+
+  // Helper: Builds Main Menu Keyboard localized to user language
+  function buildMainMenuKeyboard(langCode) {
+    return new InlineKeyboard()
+      .text(t(langCode, "btn_instant"), "btn_instant")
+      .text(t(langCode, "btn_add_sub"), "btn_add_sub")
+      .row()
+      .text(t(langCode, "btn_list_sub"), "btn_list_subs")
+      .text(t(langCode, "btn_help"), "btn_help")
+      .row()
+      .text(t(langCode, "btn_change_lang"), "btn_change_lang");
+  }
+
   // ============================================================================
   // Conversations
   // ============================================================================
 
   /**
-   * Conversation: Instant On-Demand Research
+   * Conversation: Instant Strategic Intelligence Research
    */
   async function instantResearchConversation(conversation, ctx) {
-    await ctx.reply(
-      "⚡ <b>CÀO & TỔNG HỢP TỨC THÌ</b>\n\n" +
-      "Vui lòng nhập từ khóa hoặc chủ đề bạn muốn tổng hợp tin tức ngay bây giờ (Ví dụ: <i>Node.js, AI Agents, Thị trường Vàng</i>):",
-      { parse_mode: "HTML" }
-    );
+    const langCode = (await conversation.external(() => getUserLanguage(ctx.chat.id))) || "en";
+
+    await ctx.reply(t(langCode, "instant_prompt"), { parse_mode: "HTML" });
 
     const topicMsg = await conversation.wait();
     const topic = topicMsg.message?.text?.trim();
 
-    if (!topic) {
-      await ctx.reply("❌ Đã hủy thao tác: Không nhận được từ khóa hợp lệ.", { parse_mode: "HTML" });
+    if (!topic || topic.toLowerCase() === "/cancel") {
+      await ctx.reply(t(langCode, "cancel_success"));
       return;
     }
 
-    const statusMsg = await ctx.reply(
-      `⏳ <b>Đang thu thập dữ liệu cho chủ đề:</b> <i>${escapeHtml(topic)}</i>...`,
-      { parse_mode: "HTML" }
-    );
+    const statusMsg = await ctx.reply(t(langCode, "instant_collecting"), { parse_mode: "HTML" });
 
     try {
       // Step 1: Scrape
@@ -121,7 +146,7 @@ function createBot() {
         await bot.api.editMessageText(
           ctx.chat.id,
           statusMsg.message_id,
-          `⚠️ Không tìm thấy bài báo hoặc tin tức mới nào cho chủ đề: <i>${escapeHtml(topic)}</i>.`,
+          t(langCode, "instant_no_articles", { topic: escapeHtml(topic) }),
           { parse_mode: "HTML" }
         ).catch(() => {});
         return;
@@ -130,25 +155,27 @@ function createBot() {
       await bot.api.editMessageText(
         ctx.chat.id,
         statusMsg.message_id,
-        `🤖 Đã thu thập được <b>${articles.length}</b> bài viết từ mạng lưới báo chí quốc tế. Đang phân tích chiến lược đa cực qua DeepSeek V3...`,
+        t(langCode, "instant_analyzing", { count: articles.length, lang: langCode.toUpperCase() }),
         { parse_mode: "HTML" }
       ).catch(() => {});
 
-      // Step 2: Fetch Topic History (Event Ledger) & DeepSeek Synthesis
+      // Step 2: Fetch Topic History (Event Ledger) & DeepSeek Synthesis in target language
       const topicHistory = await conversation.external(() => getTopicHistory(topic));
-      const summary = await conversation.external(() => synthesizeArticles(topic, articles, null, topicHistory));
+      const summary = await conversation.external(() =>
+        synthesizeArticles(topic, articles, null, topicHistory, langCode)
+      );
 
       // Update Event Ledger with new event states
       if (Array.isArray(summary.events) && summary.events.length > 0) {
         for (const evt of summary.events.slice(0, 3)) {
           const key = (evt.title || "general").slice(0, 80);
-          const state = evt.hard_facts || evt.details || evt.title;
+          const state = evt.hard_facts || evt.core_verdict || evt.title;
           await conversation.external(() => upsertTopicState(topic, key, state)).catch(() => {});
         }
       }
 
-      // Step 3: Chunk and send
-      const pages = chunkInstantResearchToPages(topic, summary);
+      // Step 3: Chunk and send with user's selected language template
+      const pages = chunkInstantResearchToPages(topic, summary, langCode);
 
       // Delete status message
       await bot.api.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
@@ -157,8 +184,8 @@ function createBot() {
         const isLastPage = (i === pages.length - 1);
         const replyMarkup = isLastPage
           ? new InlineKeyboard()
-              .text("👍 Xác nhận chuẩn xác", `fb:good:${topic.slice(0, 30)}`)
-              .text("⚠️ Báo cáo tin sai", `fb:bad:${topic.slice(0, 30)}`)
+              .text(t(langCode, "feedback_confirmed_btn"), `fb:good:${topic.slice(0, 30)}`)
+              .text(t(langCode, "feedback_disputed_btn"), `fb:bad:${topic.slice(0, 30)}`)
           : undefined;
 
         await sendSafeMessage(ctx.chat.id, pages[i], replyMarkup ? { reply_markup: replyMarkup } : {});
@@ -169,7 +196,7 @@ function createBot() {
     } catch (err) {
       console.error("[Instant Research Error]:", err);
       await ctx.reply(
-        `❌ <b>Lỗi tổng hợp tin:</b> <code>${escapeHtml(err.message)}</code>`,
+        t(langCode, "instant_error", { error: escapeHtml(err.message) }),
         { parse_mode: "HTML" }
       ).catch(() => {});
     }
@@ -179,76 +206,69 @@ function createBot() {
    * Conversation: Create Subscription Schedule
    */
   async function createSubscriptionConversation(conversation, ctx) {
+    const langCode = (await conversation.external(() => getUserLanguage(ctx.chat.id))) || "en";
+
     await ctx.reply(
-      "➕ <b>THÊM LỊCH THEO DÕI TIN TỨC MỚI</b>\n\n" +
-      "<b>Bước 1/4:</b> Nhập từ khóa chủ đề (Topic) cần theo dõi định kỳ:\n" +
-      "(Ví dụ: <i>AI, Node.js, Bất động sản, Bitcoin</i>)",
+      "➕ <b>ADD INTELLIGENCE MONITORING SCHEDULE</b>\n\n" +
+      "<b>Step 1/4:</b> Enter the Topic or Entity to track:\n" +
+      "<i>(e.g., AI Semiconductors, US Economy, Vietnam Real Estate)</i>",
       { parse_mode: "HTML" }
     );
 
     const topicMsg = await conversation.wait();
     const topic = topicMsg.message?.text?.trim();
-    if (!topic) {
-      await ctx.reply("❌ Đã hủy tạo lịch: Từ khóa không hợp lệ.");
+    if (!topic || topic.toLowerCase() === "/cancel") {
+      await ctx.reply(t(langCode, "cancel_success"));
       return;
     }
 
     await ctx.reply(
-      `<b>Bước 2/4:</b> Nhập hướng dẫn phân tích riêng cho AI (Topic Guidance).\n\n` +
-      `<i>Ví dụ: "Đối chiếu góc nhìn Mỹ và Châu Âu", "Chú trọng cập nhật bán dẫn & xuất khẩu"...</i>\n` +
-      `Hoặc gửi <code>skip</code> / <code>bo qua</code> để bỏ qua bước này:`,
+      `<b>Step 2/4:</b> Enter custom analytical guidance (Topic Guidance):\n\n` +
+      `<i>e.g.: "Focus on M&A antitrust rulings", "Compare Western vs Eastern viewpoints"...</i>\n` +
+      `Or send <code>skip</code> to skip this step:`,
       { parse_mode: "HTML" }
     );
 
     const guidanceMsg = await conversation.wait();
-    const rawGuidance = guidanceMsg.message?.text?.trim();
-    let promptGuidance = null;
-    if (rawGuidance && !["skip", "bo qua", "bỏ qua", "/skip"].includes(rawGuidance.toLowerCase())) {
-      promptGuidance = rawGuidance;
+    const guidanceRaw = guidanceMsg.message?.text?.trim();
+    const promptGuidance =
+      guidanceRaw && !["skip", "bo qua", "bỏ qua"].includes(guidanceRaw.toLowerCase())
+        ? guidanceRaw
+        : null;
+
+    const scheduleTypeKeyboard = new InlineKeyboard()
+      .text("🔄 Recurring Daily", "sched_recurring")
+      .text("📅 Specific Date", "sched_specific");
+
+    await ctx.reply(
+      "<b>Step 3/4:</b> Choose schedule frequency type:",
+      { parse_mode: "HTML", reply_markup: scheduleTypeKeyboard }
+    );
+
+    const typeCtx = await conversation.waitForCallbackQuery(["sched_recurring", "sched_specific"]);
+    await typeCtx.answerCallbackQuery();
+    const scheduleType = typeCtx.callbackQuery.data === "sched_recurring" ? "recurring" : "specific_date";
+
+    let specificDate = null;
+    if (scheduleType === "specific_date") {
+      await ctx.reply(
+        "Enter specific delivery date in <code>YYYY-MM-DD</code> format:\n(e.g., <code>2026-11-15</code>)",
+        { parse_mode: "HTML" }
+      );
+      const dateMsg = await conversation.wait();
+      specificDate = dateMsg.message?.text?.trim();
     }
 
     await ctx.reply(
-      "<b>Bước 3/4:</b> Nhập khung giờ nhận bản tin (từ <code>0</code> đến <code>23</code> theo giờ Việt Nam):\n" +
-      "<i>Ví dụ: Nhập <code>8</code> nếu muốn nhận vào 8h sáng, hoặc <code>18</code> nếu muốn nhận vào 18h chiều.</i>",
+      "<b>Step 4/4:</b> Enter delivery hour (0 - 23 in Vietnam Time UTC+7):\n(e.g.: <code>7</code>, <code>12</code>, <code>18</code>, <code>21</code>)",
       { parse_mode: "HTML" }
     );
 
     const hourMsg = await conversation.wait();
-    const rawHour = hourMsg.message?.text?.trim();
-    const deliveryHour = parseInt(rawHour, 10);
+    const deliveryHour = parseInt(hourMsg.message?.text?.trim(), 10);
 
     if (isNaN(deliveryHour) || deliveryHour < 0 || deliveryHour > 23) {
-      await ctx.reply("❌ Khung giờ không hợp lệ (phải là số nguyên từ 0 đến 23). Đã hủy tạo lịch.");
-      return;
-    }
-
-    await ctx.reply(
-      "<b>Bước 4/4:</b> Chọn tần suất nhận tin:\n" +
-      "1️⃣ Nhập <code>1</code>: Hàng ngày (Thứ 2 - Chủ nhật)\n" +
-      "2️⃣ Nhập <code>2</code>: Ngày trong tuần (Thứ 2 - Thứ 6)\n" +
-      "3️⃣ Nhập <code>3</code>: Cuối tuần (Thứ 7 & Chủ nhật)\n" +
-      "4️⃣ Hoặc nhập ngày cụ thể theo định dạng <code>YYYY-MM-DD</code> (Ví dụ: <code>2026-11-10</code>)",
-      { parse_mode: "HTML" }
-    );
-
-    const freqMsg = await conversation.wait();
-    const freqInput = freqMsg.message?.text?.trim();
-
-    let scheduleType = "recurring";
-    let daysOfWeek = "1,2,3,4,5,6,7";
-    let specificDate = null;
-
-    if (freqInput === "1") {
-      daysOfWeek = "1,2,3,4,5,6,7";
-    } else if (freqInput === "2") {
-      daysOfWeek = "1,2,3,4,5";
-    } else if (freqInput === "3") {
-      daysOfWeek = "6,7";
-    } else if (/^\d{4}-\d{2}-\d{2}$/.test(freqInput)) {
-      scheduleType = "specific_date";
-      specificDate = freqInput;
-    } else {
-      await ctx.reply("❌ Tần suất không hợp lệ. Đã hủy tạo lịch.");
+      await ctx.reply("❌ Invalid delivery hour. Setup cancelled.");
       return;
     }
 
@@ -259,29 +279,22 @@ function createBot() {
           topic,
           promptGuidance,
           scheduleType,
-          daysOfWeek,
           specificDate,
           deliveryHour
         })
       );
 
-      const scheduleDesc =
-        scheduleType === "specific_date"
-          ? `Một lần vào ngày: <code>${specificDate}</code>`
-          : `Định kỳ các ngày: <code>${daysOfWeek}</code>`;
-
       await ctx.reply(
-        `✅ <b>ĐÃ THIẾT LẬP LỊCH THEO DÕI THÀNH CÔNG!</b>\n\n` +
-        `🆔 ID: <code>${subId}</code>\n` +
-        `📌 Chủ đề: <b>${escapeHtml(topic)}</b>\n` +
-        `⏰ Giờ gửi: <b>${deliveryHour}:00</b> (Giờ VN)\n` +
-        `📅 Tần suất: ${scheduleDesc}\n` +
-        `🎯 Chỉ đạo riêng: <i>${escapeHtml(promptGuidance || "Không có")}</i>`,
+        `✅ <b>SCHEDULE CREATED SUCCESSFULLY!</b>\n\n` +
+        `• <b>ID:</b> <code>#${subId}</code>\n` +
+        `• <b>Topic:</b> <i>${escapeHtml(topic)}</i>\n` +
+        `• <b>Shift Hour:</b> <code>${String(deliveryHour).padStart(2, "0")}:00</code> (UTC+7)\n` +
+        `• <b>Frequency:</b> <code>${scheduleType}</code>`,
         { parse_mode: "HTML" }
       );
     } catch (err) {
       console.error("[Create Subscription Error]:", err);
-      await ctx.reply(`❌ Lỗi khi lưu vào cơ sở dữ liệu: ${escapeHtml(err.message)}`);
+      await ctx.reply(`❌ Database Error: ${escapeHtml(err.message)}`);
     }
   }
 
@@ -292,37 +305,57 @@ function createBot() {
   // Command & UI Routing Handlers
   // ============================================================================
 
-  function buildMainMenuKeyboard() {
-    return new InlineKeyboard()
-      .text("⚡ Cào tức thì", "btn_instant")
-      .text("➕ Thêm lịch", "btn_add_sub")
-      .row()
-      .text("📋 Danh sách lịch", "btn_list_subs")
-      .text("ℹ️ Trợ giúp", "btn_help");
-  }
-
+  // /start: Checks if user has language set. If not, prompts language picker!
   bot.command("start", async (ctx) => {
-    const welcomeText =
-      `🛡️ <b>HỆ THỐNG TÌNH BÁO & TỔNG HỢP TIN TỨC TỰ ĐỘNG</b>\n\n` +
-      `Xin chào Admin! Hệ thống đang hoạt động 24/7 để giám sát, thu thập và phân tích dữ liệu từ mạng lưới báo chí 9 cường quốc qua DeepSeek OSINT v3.\n\n` +
-      `Chọn một tính năng dưới đây để bắt đầu:`;
+    const existingLang = await getUserLanguage(ctx.chat.id);
 
+    if (!existingLang) {
+      // First time user: Show Language Picker directly
+      await ctx.reply(t("en", "select_language_title"), {
+        parse_mode: "HTML",
+        reply_markup: buildLanguageKeyboard()
+      });
+      return;
+    }
+
+    // Returning user: Go directly into Main Menu localized
+    const welcomeText = `${t(existingLang, "welcome_title")}\n\n${t(existingLang, "welcome_body")}`;
     await ctx.reply(welcomeText, {
       parse_mode: "HTML",
-      reply_markup: buildMainMenuKeyboard()
+      reply_markup: buildMainMenuKeyboard(existingLang)
+    });
+  });
+
+  // /lang or /language command to switch language at any time
+  bot.command(["lang", "language"], async (ctx) => {
+    await ctx.reply(t("en", "select_language_title"), {
+      parse_mode: "HTML",
+      reply_markup: buildLanguageKeyboard()
+    });
+  });
+
+  // Language Selection Callback Handler
+  bot.callbackQuery(/^set_lang:([a-z]{2})$/, async (ctx) => {
+    const langCode = ctx.match[1];
+    await setUserLanguage(ctx.chat.id, langCode);
+
+    await ctx.answerCallbackQuery({ text: `Language set: ${langCode.toUpperCase()}` });
+
+    // Send confirmation and open main menu directly
+    await ctx.reply(t(langCode, "language_saved"), { parse_mode: "HTML" });
+
+    const welcomeText = `${t(langCode, "welcome_title")}\n\n${t(langCode, "welcome_body")}`;
+    await ctx.reply(welcomeText, {
+      parse_mode: "HTML",
+      reply_markup: buildMainMenuKeyboard(langCode)
     });
   });
 
   bot.command("help", async (ctx) => {
-    const helpText =
-      `📖 <b>DANH SÁCH LỆNH ĐIỀU HÀNH:</b>\n\n` +
-      `/start - Bật menu điều khiển chính\n` +
-      `/instant - Tổng hợp tin tức nhanh theo chủ đề bất kỳ\n` +
-      `/add - Thiết lập ca theo dõi tin tức mới\n` +
-      `/list - Xem và quản lý các lịch đang hoạt động\n` +
-      `/help - Hướng dẫn sử dụng`;
-
-    await ctx.reply(helpText, { parse_mode: "HTML" });
+    const langCode = (await getUserLanguage(ctx.chat.id)) || "en";
+    await ctx.reply(`${t(langCode, "help_title")}\n\n${t(langCode, "help_body")}`, {
+      parse_mode: "HTML"
+    });
   });
 
   bot.command("instant", async (ctx) => {
@@ -354,31 +387,34 @@ function createBot() {
   });
 
   bot.callbackQuery("btn_help", async (ctx) => {
+    const langCode = (await getUserLanguage(ctx.chat.id)) || "en";
     await ctx.answerCallbackQuery();
-    await ctx.reply(
-      `💡 <b>Cơ chế hoạt động của Bot:</b>\n` +
-      `- <b>Cào dữ liệu:</b> Tự động cào mỗi 30 phút một lần.\n` +
-      `- <b>Phân tích:</b> Trước mỗi giờ ca phát hành (H-1), AI sẽ tổng hợp và tam giác hóa dữ kiện bài viết mới.\n` +
-      `- <b>Gửi tin:</b> Đúng đầu giờ ca, hệ thống chia nhỏ trang HTML và phát hành cho bạn.\n` +
-      `- <b>An toàn:</b> Không bao giờ trùng tin giữa các ca nhờ Watermark <code>last_delivered_at</code>.`,
-      { parse_mode: "HTML" }
-    );
+    await ctx.reply(`${t(langCode, "help_title")}\n\n${t(langCode, "help_body")}`, {
+      parse_mode: "HTML"
+    });
   });
 
-  // Toggle active/inactive subscription callback
+  bot.callbackQuery("btn_change_lang", async (ctx) => {
+    await ctx.answerCallbackQuery().catch(() => {});
+    await ctx.reply(t("en", "select_language_title"), {
+      parse_mode: "HTML",
+      reply_markup: buildLanguageKeyboard()
+    });
+  });
+
+  // Toggle subscription callback
   bot.callbackQuery(/^toggle_(\d+)$/, async (ctx) => {
     const subId = parseInt(ctx.match[1], 10);
     const sub = await getSubscriptionById(subId);
-
     if (!sub) {
-      await ctx.answerCallbackQuery({ text: "Không tìm thấy lịch theo dõi!" });
+      await ctx.answerCallbackQuery({ text: "Schedule not found." });
       return;
     }
 
     const newStatus = !sub.is_active;
     await toggleSubscriptionStatus(subId, newStatus);
     await ctx.answerCallbackQuery({
-      text: newStatus ? "Đã bật kích hoạt lịch!" : "Đã tạm dừng lịch!"
+      text: newStatus ? "Schedule activated!" : "Schedule paused!"
     });
 
     await handleListSubscriptions(ctx, true);
@@ -388,12 +424,13 @@ function createBot() {
   bot.callbackQuery(/^delete_(\d+)$/, async (ctx) => {
     const subId = parseInt(ctx.match[1], 10);
     await deleteSubscription(subId);
-    await ctx.answerCallbackQuery({ text: "Đã xóa lịch theo dõi thành công!" });
+    await ctx.answerCallbackQuery({ text: "Schedule deleted successfully!" });
     await handleListSubscriptions(ctx, true);
   });
 
   // Layer 11: Dynamic Feedback Loop Handler
   bot.callbackQuery(/^fb:(good|bad):(.+)$/, async (ctx) => {
+    const langCode = (await getUserLanguage(ctx.chat.id)) || "en";
     const isGood = ctx.match[1] === "good";
     const topicKey = ctx.match[2];
     const feedbackType = isGood ? "CONFIRMED" : "DISPUTED";
@@ -402,24 +439,24 @@ function createBot() {
       await recordSourceFeedback(ctx.chat.id, topicKey, topicKey, feedbackType);
       if (isGood) {
         await ctx.answerCallbackQuery({
-          text: "✅ Cảm ơn bạn! Đã ghi nhận tín nhiệm cho các nguồn tin này.",
+          text: t(langCode, "feedback_confirmed"),
           show_alert: false
         });
         await ctx.editMessageReplyMarkup({
-          reply_markup: new InlineKeyboard().text("✅ Đã ghi nhận chuẩn xác", "noop")
+          reply_markup: new InlineKeyboard().text(t(langCode, "feedback_confirmed_btn"), "noop")
         }).catch(() => {});
       } else {
         await ctx.answerCallbackQuery({
-          text: "⚠️ Đã ghi nhận báo cáo sai lệch. Điểm tín nhiệm của nguồn tin đã được điều chỉnh giảm.",
+          text: t(langCode, "feedback_disputed"),
           show_alert: true
         });
         await ctx.editMessageReplyMarkup({
-          reply_markup: new InlineKeyboard().text("⚠️ Đã ghi nhận báo cáo lỗi", "noop")
+          reply_markup: new InlineKeyboard().text(t(langCode, "feedback_disputed_btn"), "noop")
         }).catch(() => {});
       }
     } catch (err) {
       console.error("[Feedback Loop Error]:", err);
-      await ctx.answerCallbackQuery({ text: "Lỗi ghi nhận phản hồi." }).catch(() => {});
+      await ctx.answerCallbackQuery({ text: "Error recording feedback." }).catch(() => {});
     }
   });
 
@@ -430,8 +467,8 @@ function createBot() {
     const subs = await getAllSubscriptions(ctx.chat.id);
 
     if (subs.length === 0) {
-      const emptyText = "📋 <b>Hiện tại bạn chưa có lịch theo dõi nào.</b>\n\nBấm nút bên dưới để thêm lịch mới:";
-      const kb = new InlineKeyboard().text("➕ Thêm lịch ngay", "btn_add_sub");
+      const emptyText = "📋 <b>No active intelligence schedules.</b>\n\nClick below to add a new schedule:";
+      const kb = new InlineKeyboard().text("➕ Add Schedule", "btn_add_sub");
 
       if (isEdit && ctx.callbackQuery?.message) {
         await ctx.editMessageText(emptyText, { parse_mode: "HTML", reply_markup: kb }).catch(() => {});
@@ -441,31 +478,31 @@ function createBot() {
       return;
     }
 
-    let text = `📋 <b>DANH SÁCH LỊCH THEO DÕI (${subs.length} lịch):</b>\n\n`;
+    let text = `📋 <b>ACTIVE SCHEDULES (${subs.length} active):</b>\n\n`;
     const keyboard = new InlineKeyboard();
 
     subs.forEach((sub, idx) => {
-      const statusIcon = sub.is_active ? "🟢 [BẬT]" : "🔴 [TẮT]";
+      const statusIcon = sub.is_active ? "🟢 [ON]" : "🔴 [OFF]";
       const timeStr = `${String(sub.delivery_hour).padStart(2, "0")}:00`;
       const freqStr =
         sub.schedule_type === "specific_date"
           ? sub.specific_date?.toISOString?.()?.slice(0, 10) || sub.specific_date
-          : `Thứ ${sub.days_of_week}`;
+          : `Days ${sub.days_of_week}`;
 
       text += `${idx + 1}. ${statusIcon} <b>${escapeHtml(sub.topic.toUpperCase())}</b>\n`;
-      text += `   ⏰ Ca: <code>${timeStr}</code> | Lịch: <code>${freqStr}</code>\n`;
+      text += `   ⏰ Shift: <code>${timeStr}</code> | Schedule: <code>${freqStr}</code>\n`;
       if (sub.prompt_guidance) {
-        text += `   🎯 Chỉ đạo: <i>${escapeHtml(sub.prompt_guidance)}</i>\n`;
+        text += `   🎯 Guidance: <i>${escapeHtml(sub.prompt_guidance)}</i>\n`;
       }
       text += `\n`;
 
       keyboard
-        .text(`${sub.is_active ? "⏸ Tắt" : "▶️ Bật"} #${sub.id}`, `toggle_${sub.id}`)
-        .text(`🗑 Xóa #${sub.id}`, `delete_${sub.id}`)
+        .text(`${sub.is_active ? "⏸ Pause" : "▶️ Start"} #${sub.id}`, `toggle_${sub.id}`)
+        .text(`🗑 Delete #${sub.id}`, `delete_${sub.id}`)
         .row();
     });
 
-    keyboard.text("➕ Thêm lịch mới", "btn_add_sub");
+    keyboard.text("➕ Add New Schedule", "btn_add_sub");
 
     if (isEdit && ctx.callbackQuery?.message) {
       await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: keyboard }).catch(() => {});

@@ -14,8 +14,10 @@ const {
   deactivateSpecificDateSubscription,
   deleteStaleArticles,
   getTopicHistory,
-  upsertTopicState
+  upsertTopicState,
+  getUserLanguage
 } = require("./lib/db_operations");
+const { t } = require("./lib/i18n");
 const { scrapeTopic } = require("./lib/scraper");
 const { synthesizeArticles } = require("./lib/synthesizer");
 const { chunkDigestToPages, escapeHtml } = require("./lib/chunker");
@@ -223,19 +225,20 @@ async function executeDispatchJob(sendSafeMessage) {
         summaryObj = { overview: "Lỗi định dạng bản tin.", events: [] };
       }
 
+      const langCode = (await getUserLanguage(digest.chat_id)) || "en";
       const pages = chunkDigestToPages({
         topic: digest.topic,
         deliveryHour: digest.delivery_hour,
         summary: summaryObj
-      });
+      }, langCode);
 
       // Send each page sequentially with 1,000 ms delay
       for (let i = 0; i < pages.length; i++) {
         const isLastPage = (i === pages.length - 1);
         const replyMarkup = isLastPage
           ? new InlineKeyboard()
-              .text("👍 Xác nhận chuẩn xác", `fb:good:${digest.topic.slice(0, 30)}`)
-              .text("⚠️ Báo cáo tin sai", `fb:bad:${digest.topic.slice(0, 30)}`)
+              .text(t(langCode, "feedback_confirmed_btn"), `fb:good:${digest.topic.slice(0, 30)}`)
+              .text(t(langCode, "feedback_disputed_btn"), `fb:bad:${digest.topic.slice(0, 30)}`)
           : undefined;
 
         await sendSafeMessage(digest.chat_id, pages[i], replyMarkup ? { reply_markup: replyMarkup } : {});

@@ -128,3 +128,15 @@ CREATE TABLE IF NOT EXISTS feedback_logs (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_feedback_domain (domain)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ============================================================================
+-- Table: user_settings
+-- Purpose: Stores user profile preferences (Language, Notifications).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS user_settings (
+  chat_id BIGINT PRIMARY KEY,
+  language_code VARCHAR(10) NOT NULL DEFAULT 'en',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
