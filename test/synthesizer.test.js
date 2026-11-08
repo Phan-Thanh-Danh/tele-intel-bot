@@ -4,7 +4,8 @@ const {
   buildPrompt,
   buildRawFallbackJson,
   validateAndSanitizeDigest,
-  getModelsList
+  getModelsList,
+  synthesizeArticles
 } = require("../lib/synthesizer");
 const { parseRecentEventsFromRows } = require("../lib/db_operations");
 
@@ -140,13 +141,28 @@ test("synthesizer: getModelsList respects LLM_MODEL and LLM_FALLBACK_MODEL", () 
   const origFallback = process.env.LLM_FALLBACK_MODEL;
 
   try {
-    process.env.LLM_MODEL = "deepseek/deepseek-chat";
-    process.env.LLM_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
+    process.env.LLM_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+    process.env.LLM_FALLBACK_MODEL = "nvidia/nemotron-3.5-lightning:free";
 
     const models = getModelsList();
     assert.strictEqual(models.length, 2);
-    assert.strictEqual(models[0], "deepseek/deepseek-chat");
-    assert.strictEqual(models[1], "meta-llama/llama-3.3-70b-instruct:free");
+    assert.strictEqual(models[0], "nvidia/nemotron-3-ultra-550b-a55b:free");
+    assert.strictEqual(models[1], "nvidia/nemotron-3.5-lightning:free");
+  } finally {
+    process.env.LLM_MODEL = origModel;
+    process.env.LLM_FALLBACK_MODEL = origFallback;
+  }
+});
+
+test("synthesizer: hard guard blocks non-free model from execution", async () => {
+  const origModel = process.env.LLM_MODEL;
+  const origFallback = process.env.LLM_FALLBACK_MODEL;
+  try {
+    process.env.LLM_MODEL = "openai/gpt-4o";
+    process.env.LLM_FALLBACK_MODEL = "anthropic/claude-3-opus";
+    const articles = [{ title: "Test Headline", link: "https://example.com/test", content_snippet: "Snippet" }];
+    const res = await synthesizeArticles("test", articles);
+    assert.ok(res.overview.includes("emergency fallback"));
   } finally {
     process.env.LLM_MODEL = origModel;
     process.env.LLM_FALLBACK_MODEL = origFallback;
