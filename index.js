@@ -16,7 +16,8 @@ const {
   getTopicHistory,
   upsertTopicState,
   getUserLanguage,
-  getCustomFeeds
+  getCustomFeeds,
+  getRecentSentEvents
 } = require("./lib/db_operations");
 const { t } = require("./lib/i18n");
 const { scrapeTopic, fetchRssFeed } = require("./lib/scraper");
@@ -177,7 +178,9 @@ async function executeSynthesizeJob(bot, adminChatId) {
       try {
         const articles = await getArticlesForTopicSince(sub.topic, sub.last_delivered_at, 30);
         const topicHistory = await getTopicHistory(sub.topic, 10);
-        const summary = await synthesizeArticles(sub.topic, articles, sub.prompt_guidance, topicHistory);
+        // Phase 5.1: Lấy các sự kiện gần nhất đã gửi của topic để chống lặp tin
+        const recentEvents = await getRecentSentEvents(sub.topic, 5);
+        const summary = await synthesizeArticles(sub.topic, articles, sub.prompt_guidance, topicHistory, "en", recentEvents);
 
         // Update event_ledger with latest synthesized states
         if (Array.isArray(summary.events) && summary.events.length > 0) {

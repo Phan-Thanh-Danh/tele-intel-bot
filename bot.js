@@ -19,7 +19,8 @@ const {
   setUserLanguage,
   addCustomFeed,
   getCustomFeeds,
-  deleteCustomFeed
+  deleteCustomFeed,
+  getRecentSentEvents
 } = require("./lib/db_operations");
 const { SUPPORTED_LANGUAGES, t } = require("./lib/i18n");
 
@@ -164,8 +165,10 @@ function createBot() {
 
       // Step 2: Fetch Topic History (Event Ledger) & DeepSeek Synthesis in target language
       const topicHistory = await conversation.external(() => getTopicHistory(topic));
+      // Phase 5.1: Lấy các sự kiện gần nhất đã gửi của topic để chống lặp tin
+      const recentEvents = await conversation.external(() => getRecentSentEvents(topic, 5));
       const summary = await conversation.external(() =>
-        synthesizeArticles(topic, articles, null, topicHistory, langCode)
+        synthesizeArticles(topic, articles, null, topicHistory, langCode, recentEvents)
       );
 
       // Update Event Ledger with new event states
