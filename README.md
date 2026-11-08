@@ -144,14 +144,17 @@ Environment variables:
 
 > [!IMPORTANT]
 > **Zero-Cost Operation & Free Tier Limits**:
-> - **100% Free Models**: The bot enforces a hard code guard preventing any paid model calls. `LLM_MODEL` and `LLM_FALLBACK_MODEL` must end with `:free`.
+> - **Free Tier Models Only**: The bot enforces a code-level guard requiring model IDs to end with `:free`. Any request referencing a non-free model ID is rejected before transmission.
 > - **OpenRouter Free Tier Constraints**: Free models operate under rate limits of **20 requests per minute (RPM)** and **50 requests per day (RPD)**.
-> - **Model Availability**: Free community models on OpenRouter may be deprecated or rotated without notice; the system automatically fails over to `LLM_FALLBACK_MODEL` and alerts the Admin.
-> - **Key Limits Setting**: You can set an explicit \$0.00 credit limit on your OpenRouter key at [https://openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) under menu **"API Keys"** -> Click your Key name -> **"Limit"** (Credit limit USD).
+> - **Development & Test Consumption**: Running manual test scripts (such as `test_manual_anti_repetition.js` or `test_vietnamese_anti_repetition.js`) makes real calls to OpenRouter and increments the daily counter in `llm_daily_usage`.
+> - **Model Availability**: Free community models on OpenRouter may be deprecated or rotated by providers; the system automatically falls back to `LLM_FALLBACK_MODEL` and sends an alert.
+> - **Verification & Credit Limit**:
+>   - **Activity Page**: [https://openrouter.ai/activity](https://openrouter.ai/activity) lists every request with model ID, token count, and cost ($0.00).
+>   - **API Keys Settings**: [https://openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) allows setting a hard credit limit of $0.00 under "Credit Limit (USD)".
 
 ### Daily Request Budget & Schedule Capacity
 
-Each digest synthesis is hard-capped at **at most 2 requests in total** (1 initial request + at most 1 retry for transient/JSON correction):
+Each digest synthesis is capped at **at most 2 requests in total** (1 initial request + at most 1 fallback or JSON correction retry):
 
 | Active Topics ($N$) | Scheduled Shifts ($S$) | Nominal Requests / Day | Worst-Case Max (with Retries) | Daily Limit Margin (`LLM_DAILY_LIMIT=40`) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -159,6 +162,18 @@ Each digest synthesis is hard-capped at **at most 2 requests in total** (1 initi
 | 3 topics | 3 shifts (07:00, 12:00, 19:00) | **9 calls** | 18 calls | 22 calls remaining for `/instant` |
 | 5 topics | 3 shifts (07:00, 12:00, 19:00) | **15 calls** | 30 calls | 10 calls remaining for `/instant` |
 | 5 topics | 4 shifts (07:00, 12:00, 17:00, 21:00) | **20 calls** | 40 calls | Reaches daily cap in worst-case |
+
+### Database Administration & Verification (Safe Password Practices)
+
+To inspect database records without exposing credentials in command-line arguments or shell history:
+
+```bash
+# Option 1: Interactive prompt (safely prompts for password)
+docker exec -it tele_intel_mysql mysql -u bot_user -p tele_intel_bot
+
+# Option 2: Using the container's internal environment variable
+docker exec tele_intel_mysql sh -c 'mysql -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -e "SELECT * FROM llm_daily_usage;"'
+```
 
 ### Running the Application
 

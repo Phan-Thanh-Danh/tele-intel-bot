@@ -20,7 +20,8 @@ const {
   addCustomFeed,
   getCustomFeeds,
   deleteCustomFeed,
-  checkLlmBudget
+  checkLlmBudget,
+  formatVietnamDate
 } = require("./lib/db_operations");
 const { SUPPORTED_LANGUAGES, t } = require("./lib/i18n");
 
@@ -577,7 +578,7 @@ function createBot() {
       const timeStr = `${String(sub.delivery_hour).padStart(2, "0")}:00`;
       const freqStr =
         sub.schedule_type === "specific_date"
-          ? sub.specific_date?.toISOString?.()?.slice(0, 10) || sub.specific_date
+          ? formatVietnamDate(sub.specific_date)
           : `Days ${sub.days_of_week}`;
 
       text += `${idx + 1}. ${statusIcon} <b>${escapeHtml(sub.topic.toUpperCase())}</b>\n`;

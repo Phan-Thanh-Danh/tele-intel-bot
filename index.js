@@ -18,7 +18,8 @@ const {
   getUserLanguage,
   getCustomFeeds,
   getRecentSentEvents,
-  checkLlmBudget
+  checkLlmBudget,
+  formatVietnamDate
 } = require("./lib/db_operations");
 const { t } = require("./lib/i18n");
 const { scrapeTopic, fetchRssFeed } = require("./lib/scraper");
@@ -53,7 +54,7 @@ const fallbackModel = (process.env.LLM_FALLBACK_MODEL || "").trim();
 if (!primaryModel || !primaryModel.endsWith(":free")) {
   console.error(
     `[Fatal Startup Error] LLM_MODEL ("${primaryModel || "MISSING"}") không hợp lệ. ` +
-    `Bot được cấu hình ở chế độ 100% không phát sinh chi phí. Bắt buộc model phải kết thúc bằng ":free".`
+    `Bot yêu cầu model kết thúc bằng ":free" (Zero-Cost Guard).`
   );
   process.exit(1);
 }
@@ -184,7 +185,7 @@ async function executeSynthesizeJob(bot, adminChatId) {
           continue; // Not scheduled for today
         }
       } else if (sub.schedule_type === "specific_date") {
-        const specDateStr = sub.specific_date?.toISOString?.()?.slice(0, 10) || String(sub.specific_date);
+        const specDateStr = formatVietnamDate(sub.specific_date);
         if (specDateStr !== dateString) {
           continue; // Not scheduled for today
         }
