@@ -350,6 +350,30 @@ This procedure changes the bot user's password **without touching the database v
 
 ---
 
+## Number check (Automated Fact Verification)
+
+Phase 5.2 introduces an in-code number verification engine ([`lib/number_check.js`](lib/number_check.js)) that audits quantitative claims in every AI-synthesized brief against the raw source articles without extra LLM calls or latency.
+
+### How It Works
+1. **Extraction & Normalization**: Extracts percentages, monetary currencies (USD, VND, EUR), physical and engineering units (GWh, MW, GB), business metrics (orders, tickets, seats, vehicles), and sports scores. It normalizes number formats across English (`1,234.56`) and European/Vietnamese (`1.234,56`) conventions, maps magnitudes (`tỷ`, `triệu`, `billion`, `million`), and skips years, dates, times, ordinals, and technical identifiers (`5G`, `GPT-4`, `COVID-19`).
+2. **Deterministic Matching**: Verifies whether numbers in the brief match numbers in cited articles (`found_in_cited`), batch articles (`found_in_batch_only`), or can be derived via basic arithmetic (`derived_ok`, e.g., sum, difference, or percent change).
+3. **Non-Destructive Warning**: Numbers are never altered or deleted. If a number cannot be traced to the source text, a short reader warning is appended to the event:
+   ```text
+   Số liệu chưa đối chiếu được với nguồn: 999 triệu USD.
+   ```
+4. **Configuration**:
+   - `NUMBER_CHECK=on` (default): Active verification.
+   - `NUMBER_CHECK=off`: Skips verification silently.
+
+### Limitations & Boundary Nuances
+- **Short RSS Snippets**: Raw RSS feeds frequently provide only brief headline summaries. Legitimate figures present in full articles but missing from RSS snippets will be flagged as unverified (false warnings).
+- **Non-Numeric Hallucinations**: The number checker validates numbers only; it cannot detect invented non-numeric adjectives, names, locations, or unsourced phrases (e.g., whether an added phrase like *"xuất khẩu"* was in the source text).
+- **Directional Claims**: Trend direction words (e.g., *"tăng"* vs *"giảm"*, *"growth"* vs *"decline"*) are not mathematically verified.
+- **Complex Computed Numbers**: Figures resulting from calculations beyond basic addition, subtraction, or percentage change will be flagged.
+- **Word-Form Numbers**: Numbers written entirely as words (e.g., *"hai"*, *"twenty"*, *"ba mươi"*) are out of scope and ignored.
+
+---
+
 ## Data Model
 
 The database (`tele_intel_bot`) consists of 7 primary tables:
