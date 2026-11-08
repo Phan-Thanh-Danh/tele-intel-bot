@@ -19,7 +19,8 @@ const {
   setUserLanguage,
   addCustomFeed,
   getCustomFeeds,
-  deleteCustomFeed
+  deleteCustomFeed,
+  checkLlmBudget
 } = require("./lib/db_operations");
 const { SUPPORTED_LANGUAGES, t } = require("./lib/i18n");
 
@@ -139,6 +140,18 @@ function createBot() {
       return;
     }
 
+    // Kiểm tra hạn mức ngân sách gọi LLM trong ngày (LLM_DAILY_LIMIT)
+    const budget = await conversation.external(() => checkLlmBudget("instant"));
+    if (!budget.allowed) {
+      await ctx.reply(
+        `⚠️ <b>[Hạn Mức AI Đã Đạt]</b> Hôm nay bot đã thực hiện <code>${budget.count}/${budget.limit}</code> yêu cầu AI.\n\n` +
+        `Tính năng tra cứu tức thì tạm dừng để bảo toàn hạn mức cho các ca gửi tin tự động theo lịch. ` +
+        `Vui lòng thử lại vào ngày mai hoặc điều chỉnh <code>LLM_DAILY_LIMIT</code> trong file cấu hình.`,
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
     const statusMsg = await ctx.reply(t(langCode, "instant_collecting"), { parse_mode: "HTML" });
 
     try {
@@ -168,7 +181,7 @@ function createBot() {
       // để người dùng luôn nhận được báo cáo đầy đủ nhất theo yêu cầu mà không bị lược bỏ.
       const recentEvents = [];
       const summary = await conversation.external(() =>
-        synthesizeArticles(topic, articles, null, topicHistory, langCode, recentEvents)
+        synthesizeArticles(topic, articles, null, topicHistory, langCode, recentEvents, "instant")
       );
 
       // Update Event Ledger with new event states

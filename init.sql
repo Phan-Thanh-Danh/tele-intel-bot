@@ -155,3 +155,18 @@ CREATE TABLE IF NOT EXISTS custom_feeds (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_feed_active (is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ============================================================================
+-- Table: llm_daily_usage
+-- Purpose: Tracks daily LLM request volume to enforce request budgets and alerts.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS llm_daily_usage (
+  usage_date DATE NOT NULL PRIMARY KEY,
+  request_count INT NOT NULL DEFAULT 0,
+  scheduled_count INT NOT NULL DEFAULT 0,
+  instant_count INT NOT NULL DEFAULT 0,
+  last_alert_level INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

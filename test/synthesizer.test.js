@@ -1,6 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert");
-const { buildPrompt, buildRawFallbackJson } = require("../lib/synthesizer");
+const {
+  buildPrompt,
+  buildRawFallbackJson,
+  validateAndSanitizeDigest,
+  getModelsList
+} = require("../lib/synthesizer");
 const { parseRecentEventsFromRows } = require("../lib/db_operations");
 
 test("synthesizer: buildPrompt formats article list and target language instruction", () => {
@@ -128,4 +133,65 @@ test("Phase 5.1: parseRecentEventsFromRows returns empty array when rows are emp
   assert.deepStrictEqual(parseRecentEventsFromRows([]), []);
   assert.deepStrictEqual(parseRecentEventsFromRows(null), []);
   assert.deepStrictEqual(parseRecentEventsFromRows(undefined), []);
+});
+
+test("synthesizer: getModelsList respects LLM_MODEL and LLM_FALLBACK_MODEL", () => {
+  const origModel = process.env.LLM_MODEL;
+  const origFallback = process.env.LLM_FALLBACK_MODEL;
+
+  try {
+    process.env.LLM_MODEL = "deepseek/deepseek-chat";
+    process.env.LLM_FALLBACK_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
+
+    const models = getModelsList();
+    assert.strictEqual(models.length, 2);
+    assert.strictEqual(models[0], "deepseek/deepseek-chat");
+    assert.strictEqual(models[1], "meta-llama/llama-3.3-70b-instruct:free");
+  } finally {
+    process.env.LLM_MODEL = origModel;
+    process.env.LLM_FALLBACK_MODEL = origFallback;
+  }
+});
+
+test("synthesizer: validateAndSanitizeDigest discards invalid events missing title or core_verdict", () => {
+  const articles = [
+    { title: "Art 1", link: "https://example.com/1", source: "Src 1" },
+    { title: "Art 2", link: "https://example.com/2", source: "Src 2" }
+  ];
+
+  const parsed = {
+    overview: "Overall briefing",
+    events: [
+      {
+        title: "Valid Title 1",
+        core_verdict: "Valid core verdict 1",
+        key_highlights: ["Highlight 1"],
+        source_indices: [1]
+      },
+      {
+        title: "", // Missing title -> MUST BE DISCARDED
+        core_verdict: "Orphan verdict",
+        key_highlights: []
+      },
+      {
+        title: "Missing Verdict Title",
+        core_verdict: "", // Missing verdict -> MUST BE DISCARDED
+        key_highlights: []
+      },
+      {
+        title: "Valid Title 2",
+        core_verdict: "Valid core verdict 2",
+        key_highlights: "Single string highlight", // Converted to array
+        source_indices: [2]
+      }
+    ]
+  };
+
+  const validated = validateAndSanitizeDigest(parsed, articles);
+  assert.ok(validated);
+  assert.strictEqual(validated.events.length, 2);
+  assert.strictEqual(validated.events[0].title, "Valid Title 1");
+  assert.strictEqual(validated.events[1].title, "Valid Title 2");
+  assert.deepStrictEqual(validated.events[1].key_highlights, ["Single string highlight"]);
+  assert.strictEqual(validated.events[0].sources[0].url, "https://example.com/1");
 });

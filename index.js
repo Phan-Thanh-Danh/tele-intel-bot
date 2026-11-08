@@ -17,11 +17,12 @@ const {
   upsertTopicState,
   getUserLanguage,
   getCustomFeeds,
-  getRecentSentEvents
+  getRecentSentEvents,
+  checkLlmBudget
 } = require("./lib/db_operations");
 const { t } = require("./lib/i18n");
 const { scrapeTopic, fetchRssFeed } = require("./lib/scraper");
-const { synthesizeArticles } = require("./lib/synthesizer");
+const { synthesizeArticles, setAdminAlertHandler } = require("./lib/synthesizer");
 const { chunkDigestToPages, escapeHtml } = require("./lib/chunker");
 const { createBot } = require("./bot");
 
@@ -31,6 +32,7 @@ const { createBot } = require("./bot");
 const REQUIRED_ENVIRONMENT_VARIABLES = [
   "BOT_TOKEN",
   "ADMIN_CHAT_ID",
+  "OPENROUTER_API_KEY",
   "MYSQL_HOST",
   "MYSQL_USER",
   "MYSQL_PASSWORD",
@@ -42,12 +44,6 @@ for (const envKey of REQUIRED_ENVIRONMENT_VARIABLES) {
     console.error(`[Fatal Startup Error] Missing required environment variable: ${envKey}`);
     process.exit(1);
   }
-}
-
-// Ensure either OPENROUTER_API_KEY or GEMINI_API_KEY exists
-if (!process.env.OPENROUTER_API_KEY && !process.env.GEMINI_API_KEY) {
-  console.error("[Fatal Startup Error] Missing required API Key: OPENROUTER_API_KEY (or GEMINI_API_KEY)");
-  process.exit(1);
 }
 
 // ============================================================================
@@ -180,7 +176,15 @@ async function executeSynthesizeJob(bot, adminChatId) {
         const topicHistory = await getTopicHistory(sub.topic, 10);
         // Phase 5.1: Lấy các sự kiện gần nhất đã gửi của topic để chống lặp tin
         const recentEvents = await getRecentSentEvents(sub.topic, 5);
-        const summary = await synthesizeArticles(sub.topic, articles, sub.prompt_guidance, topicHistory, "en", recentEvents);
+        const summary = await synthesizeArticles(
+          sub.topic,
+          articles,
+          sub.prompt_guidance,
+          topicHistory,
+          "en",
+          recentEvents,
+          "scheduled"
+        );
 
         // Update event_ledger with latest synthesized states
         if (Array.isArray(summary.events) && summary.events.length > 0) {
@@ -314,6 +318,11 @@ async function bootstrap() {
   // Step 2: Initialize Telegram Bot
   const { bot, sendSafeMessage } = createBot();
   const adminChatId = process.env.ADMIN_CHAT_ID;
+
+  // Đăng ký nhận cảnh báo khẩn cấp từ OpenRouter Synthesizer gửi về Telegram Admin
+  setAdminAlertHandler(async (alertMessage) => {
+    await bot.api.sendMessage(adminChatId, alertMessage, { parse_mode: "HTML" }).catch(() => {});
+  });
 
   // Step 3: Register Cron Schedulers
   // 1. Ingest Job: Every 30 minutes
