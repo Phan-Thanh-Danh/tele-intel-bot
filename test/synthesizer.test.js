@@ -4,6 +4,7 @@ const {
   buildPrompt,
   buildRawFallbackJson,
   validateAndSanitizeDigest,
+  safeParseJson,
   getModelsList,
   synthesizeArticles
 } = require("../lib/synthesizer");
@@ -244,4 +245,90 @@ test("Phase 5.1: parseRecentEventsFromRows respects increased limit of up to 12 
   assert.strictEqual(extracted.length, 12);
   assert.strictEqual(extracted[0].title, "Historical Event #1");
   assert.strictEqual(extracted[11].title, "Historical Event #12");
+});
+
+test("synthesizer: safeParseJson handles reasoning <think> and <thought> tags", () => {
+  const rawWithThink = `<think>
+I need to output JSON schema with { "events": [] }.
+Let's analyze the articles...
+</think>
+{
+  "overview": "No relevant events found in input articles.",
+  "events": []
+}`;
+  const parsed = safeParseJson(rawWithThink);
+  assert.ok(parsed);
+  assert.strictEqual(parsed.overview, "No relevant events found in input articles.");
+  assert.deepStrictEqual(parsed.events, []);
+
+  const rawWithThought = `<thought>Internal chain of thought...</thought>{"overview": "Ok", "events": []}`;
+  const parsedThought = safeParseJson(rawWithThought);
+  assert.ok(parsedThought);
+  assert.strictEqual(parsedThought.overview, "Ok");
+});
+
+test("synthesizer: safeParseJson extracts JSON inside markdown code blocks with surrounding text", () => {
+  const raw = `Here is the requested intelligence briefing:
+\`\`\`json
+{
+  "overview": "Test briefing",
+  "events": [
+    {
+      "priority": "HIGH",
+      "title": "Factory Launch",
+      "core_verdict": "Completed on schedule.",
+      "key_highlights": ["Highlight 1"],
+      "source_indices": [1]
+    }
+  ]
+}
+\`\`\`
+I hope this helps!`;
+  const parsed = safeParseJson(raw);
+  assert.ok(parsed);
+  assert.strictEqual(parsed.overview, "Test briefing");
+  assert.strictEqual(parsed.events.length, 1);
+  assert.strictEqual(parsed.events[0].title, "Factory Launch");
+});
+
+test("synthesizer: safeParseJson handles trailing commas in objects and arrays", () => {
+  const rawWithTrailingComma = `{
+  "overview": "Overview with trailing comma",
+  "events": [
+    {
+      "priority": "NORMAL",
+      "title": "Title 1",
+      "core_verdict": "Verdict 1",
+      "key_highlights": ["A", "B",],
+    },
+  ],
+}`;
+  const parsed = safeParseJson(rawWithTrailingComma);
+  assert.ok(parsed);
+  assert.strictEqual(parsed.overview, "Overview with trailing comma");
+  assert.strictEqual(parsed.events.length, 1);
+});
+
+test("synthesizer: validateAndSanitizeDigest accepts valid empty events list (no news)", () => {
+  const parsed = {
+    overview: "Các bài báo cung cấp không chứa thông tin về sự kiện yêu cầu.",
+    events: []
+  };
+  const validated = validateAndSanitizeDigest(parsed, []);
+  assert.ok(validated);
+  assert.strictEqual(validated.overview, "Các bài báo cung cấp không chứa thông tin về sự kiện yêu cầu.");
+  assert.deepStrictEqual(validated.events, []);
+});
+
+test("synthesizer: validateAndSanitizeDigest rejects invalid schema (missing events array or all corrupt)", () => {
+  // Not an array
+  assert.strictEqual(validateAndSanitizeDigest({ overview: "Hi", events: "not an array" }), null);
+  // Empty object
+  assert.strictEqual(validateAndSanitizeDigest({}), null);
+  // All events corrupted (missing title and core_verdict)
+  const corrupt = {
+    overview: "Some overview",
+    events: [{ corrupt_key: 123 }, { title: "", core_verdict: "" }]
+  };
+  assert.strictEqual(validateAndSanitizeDigest(corrupt), null);
 });
