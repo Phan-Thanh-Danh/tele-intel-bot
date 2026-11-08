@@ -87,6 +87,15 @@ function inspectEventForUnwantedRepetition(event) {
         reason: "Lặp lại sự kiện khánh thành pin VinFast cũ mà không có diễn biến mới (thiếu giai đoạn 2 / 12 GWh / 10.000 đơn hàng)"
       };
     }
+    // Item 6b: Stricter check - "khánh thành giai đoạn 1" or "5 GWh" alone (without "12 GWh" or "giai đoạn 2") is a restatement
+    const restatesOldFact = (text.includes("khánh thành giai đoạn 1") || (text.includes("5 gwh") && !text.includes("12 gwh")));
+    const hasNewContext = text.includes("12 gwh") || text.includes("giai đoạn 2");
+    if (restatesOldFact && !hasNewContext) {
+      return {
+        passed: false,
+        reason: "Item 6b: Viết lại sự kiện cũ ('khánh thành giai đoạn 1' hoặc '5 GWh' đứng riêng) mà không kèm thông tin mới '12 GWh' hoặc 'giai đoạn 2'"
+      };
+    }
   }
 
   // 2. Kiểm tra chủ đề Viettel 5G:
@@ -99,6 +108,14 @@ function inspectEventForUnwantedRepetition(event) {
       return {
         passed: false,
         reason: "Lặp lại sự kiện phát sóng thử nghiệm 5G Viettel cũ mà không có diễn biến mới (thiếu cấp phép / thương mại hóa)"
+      };
+    }
+    // Item 6b: Stricter check - "thử nghiệm" or "open ran đầu tiên" standalone (without "cấp phép" or "thương mại") is a restatement
+    const restatesOldFact = (text.includes("thử nghiệm") || text.includes("open ran đầu tiên")) && !text.includes("cấp phép") && !text.includes("thương mại");
+    if (restatesOldFact) {
+      return {
+        passed: false,
+        reason: "Item 6b: Viết lại sự kiện cũ ('thử nghiệm' hoặc 'Open RAN đầu tiên' đứng riêng) mà không kèm 'cấp phép' hoặc 'thương mại hóa'"
       };
     }
   }
@@ -160,6 +177,7 @@ function evaluateOutputStrict(digest, runLabel) {
 /**
  * Thử nghiệm cố tình gây lỗi (Purposely failing check):
  * Giả lập một bản tin AI lặp lại bài viết cũ bằng lời văn khác (reworded) nhưng KHÔNG có diễn biến mới nào.
+ * Item 6b: Also includes a mock event with ONLY old facts (no new info) to verify filter catches it.
  */
 function demonstrateIntentionalFailure() {
   console.log("\n================================================================================");
@@ -185,6 +203,23 @@ function demonstrateIntentionalFailure() {
   console.log(`- passed: ${result.passed}`);
   console.log(`- reason: ${result.reason}`);
   console.log(`=> KẾT LUẬN: ${!result.passed ? "✅ BỘ LỌC ĐÃ BẮT LỖI THÀNH CÔNG VÀ CHÍNH XÁC!" : "❌ BỊ LỌT LỖI"}`);
+
+  // --- Item 6b: Mock event with ONLY old Viettel facts (thử nghiệm, no cấp phép / thương mại) ---
+  console.log("\n--- Item 6b: Mock Viettel event with ONLY old facts (should FAIL) ---");
+  const viettelOnlyOldFacts = {
+    title: "Viettel hoàn tất thử nghiệm kỹ thuật trạm Open RAN đầu tiên tại Hà Nội",
+    core_verdict: "Viettel đã thực hiện đợt phát sóng thử nghiệm Open RAN tại quận Cầu Giấy, Hà Nội.",
+    key_highlights: [
+      "Đây là trạm 5G Open RAN đầu tiên do Viettel tự phát triển.",
+      "Thử nghiệm hoàn tất đạt tiêu chuẩn kỹ thuật cơ bản."
+    ]
+  };
+  console.log("Đầu vào giả lập (Viettel - chỉ có thông tin cũ, không có cấp phép/thương mại):");
+  console.log(JSON.stringify(viettelOnlyOldFacts, null, 2));
+  const viettelResult = inspectEventForUnwantedRepetition(viettelOnlyOldFacts);
+  console.log(`- passed: ${viettelResult.passed}`);
+  console.log(`- reason: ${viettelResult.reason}`);
+  console.log(`=> Item 6b KẾT LUẬN: ${!viettelResult.passed ? "✅ BỘ LỌC BẮT ĐÚNG (Tin chỉ có thông tin cũ bị lọc)" : "❌ BỊ LỌT LỖI (Tin cũ không bị lọc)"}`);
 }
 
 async function main() {
@@ -201,8 +236,10 @@ async function main() {
     TOPIC,
     CURRENT_ARTICLES,
     "Ưu tiên các bước tiến công nghệ, hợp tác đầu tư và chính sách kinh tế.",
+    [],
+    TARGET_LANG,
     PREVIOUS_EVENTS,
-    TARGET_LANG
+    "scheduled"
   );
   const eval1 = evaluateOutputStrict(digest1, "RUN 1");
 
@@ -211,8 +248,10 @@ async function main() {
     TOPIC,
     CURRENT_ARTICLES,
     "Ưu tiên các bước tiến công nghệ, hợp tác đầu tư và chính sách kinh tế.",
+    [],
+    TARGET_LANG,
     PREVIOUS_EVENTS,
-    TARGET_LANG
+    "scheduled"
   );
   const eval2 = evaluateOutputStrict(digest2, "RUN 2");
 

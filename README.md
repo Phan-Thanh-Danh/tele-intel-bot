@@ -139,18 +139,19 @@ Environment variables:
 | `MYSQL_HOST` | Yes | Database host (`mysql` in Docker, `127.0.0.1` locally) | `127.0.0.1` |
 | `MYSQL_PORT` | Yes | Database port | `3307` |
 | `MYSQL_USER` | Yes | MySQL database user | `bot_user` |
-| `MYSQL_PASSWORD` | Yes | MySQL user password | `bot_password` |
+| `MYSQL_PASSWORD` | Yes | MySQL application user password (alphanumeric only) | `bot_password_example` |
+| `MYSQL_ROOT_PASSWORD` | Yes | MySQL root password (alphanumeric only, must differ from MYSQL_PASSWORD) | `root_password_example` |
 | `MYSQL_DATABASE` | Yes | MySQL database name | `tele_intel_bot` |
 
 > [!IMPORTANT]
 > **Zero-Cost Operation & Free Tier Limits**:
 > - **Free Tier Models Only**: The bot enforces a code-level guard requiring model IDs to end with `:free`. Any request referencing a non-free model ID is rejected before transmission.
-> - **OpenRouter Free Tier Constraints**: Free models operate under rate limits of **20 requests per minute (RPM)** and **50 requests per day (RPD)**.
+> - **OpenRouter Free Tier Constraints**: Free models operate under rate limits of **20 requests per minute (RPM)** and **50 requests per day (RPD)**. The credit limit applies only to paid usage; this bot additionally enforces free models in code, so paid usage cannot occur.
 > - **Development & Test Consumption**: Running manual test scripts (such as `test_manual_anti_repetition.js` or `test_vietnamese_anti_repetition.js`) makes real calls to OpenRouter and increments the daily counter in `llm_daily_usage`.
 > - **Model Availability**: Free community models on OpenRouter may be deprecated or rotated by providers; the system automatically falls back to `LLM_FALLBACK_MODEL` and sends an alert.
 > - **Verification & Credit Limit**:
->   - **Activity Page**: [https://openrouter.ai/activity](https://openrouter.ai/activity) lists every request with model ID, token count, and cost ($0.00).
->   - **API Keys Settings**: [https://openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) allows setting a hard credit limit of $0.00 under "Credit Limit (USD)".
+>   - **Activity Page**: [https://openrouter.ai/activity](https://openrouter.ai/activity) — lists every request with model ID, token count, and cost.
+>   - **API Keys**: "API Keys" is a separate item in the left sidebar of the OpenRouter dashboard, next to Activity and Logs. Direct link: [https://openrouter.ai/settings/keys](https://openrouter.ai/settings/keys). Set a hard credit limit of **0.01 USD** (not 0.00 — a minimal safety net that is effectively free while still providing a hard ceiling for paid usage).
 
 ### Daily Request Budget & Schedule Capacity
 
@@ -168,10 +169,13 @@ Each digest synthesis is capped at **at most 2 requests in total** (1 initial re
 To inspect database records without exposing credentials in command-line arguments or shell history:
 
 ```bash
-# Option 1: Interactive prompt (safely prompts for password)
+# Option 1: Safe env-var method (no password on command line or in shell history)
+docker exec tele_intel_mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u "$MYSQL_USER" "$MYSQL_DATABASE" -e "SELECT * FROM llm_daily_usage;"'
+
+# Option 2: Interactive prompt (safely prompts for password)
 docker exec -it tele_intel_mysql mysql -u bot_user -p tele_intel_bot
 
-# Option 2: Using the container's internal environment variable
+# Option 3: Using the container's internal environment variable
 docker exec tele_intel_mysql sh -c 'mysql -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -e "SELECT * FROM llm_daily_usage;"'
 ```
 
@@ -291,6 +295,58 @@ To update after pulling new code:
 ```bash
 docker-compose up -d --build bot
 ```
+
+---
+
+## Database Password Changes
+
+> [!WARNING]
+> Changing the database password incorrectly will cause the bot to lose access to the database. Follow the procedure below in the exact order shown.
+
+### Option A: Keep existing data (recommended)
+
+This procedure changes the bot user's password **without touching the database volume**.
+
+1. Connect to the running MySQL container as root (interactive prompt):
+   ```bash
+   docker exec -it tele_intel_mysql mysql -u root -p
+   ```
+2. Inside MySQL, run the password change (replace `<newpassword>` with the new alphanumeric password):
+   ```sql
+   ALTER USER 'bot_user'@'%' IDENTIFIED BY '<newpassword>';
+   FLUSH PRIVILEGES;
+   EXIT;
+   ```
+3. Update `MYSQL_PASSWORD` in your `.env` file to `<newpassword>`.
+4. Restart only the bot container (not MySQL — the volume is untouched):
+   ```bash
+   docker-compose up -d bot
+   ```
+
+**Order matters:** The database password must be changed before restarting the bot. If you restart the bot first, it will fail to connect.
+
+### Option B: No data to keep — full reset [DESTRUCTIVE]
+
+> [!CAUTION]
+> **[DESTRUCTIVE]** The steps below permanently delete all subscriptions, digests, and usage history. Back up first.
+
+1. **[DESTRUCTIVE]** Back up the existing database:
+   ```bash
+   docker exec tele_intel_mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysqldump -u "$MYSQL_USER" "$MYSQL_DATABASE"' > backup_$(date +%Y%m%d).sql
+   ```
+2. Stop all containers:
+   ```bash
+   docker-compose down
+   ```
+3. **[DESTRUCTIVE]** Remove the MySQL data volume (this deletes ALL database data):
+   ```bash
+   docker volume rm tele-intel-bot_mysql_data
+   ```
+4. Update both `MYSQL_PASSWORD` and `MYSQL_ROOT_PASSWORD` in `.env` to new alphanumeric values.
+5. Restart everything (MySQL will re-initialize from `init.sql`):
+   ```bash
+   docker-compose up -d
+   ```
 
 ---
 
