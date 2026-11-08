@@ -19,8 +19,7 @@ const {
   setUserLanguage,
   addCustomFeed,
   getCustomFeeds,
-  deleteCustomFeed,
-  getRecentSentEvents
+  deleteCustomFeed
 } = require("./lib/db_operations");
 const { SUPPORTED_LANGUAGES, t } = require("./lib/i18n");
 
@@ -165,8 +164,9 @@ function createBot() {
 
       // Step 2: Fetch Topic History (Event Ledger) & DeepSeek Synthesis in target language
       const topicHistory = await conversation.external(() => getTopicHistory(topic));
-      // Phase 5.1: Lấy các sự kiện gần nhất đã gửi của topic để chống lặp tin
-      const recentEvents = await conversation.external(() => getRecentSentEvents(topic, 5));
+      // Khối chống lặp tin (anti-repetition) mặc định TẮT ở chế độ tra cứu tức thì (/instant)
+      // để người dùng luôn nhận được báo cáo đầy đủ nhất theo yêu cầu mà không bị lược bỏ.
+      const recentEvents = [];
       const summary = await conversation.external(() =>
         synthesizeArticles(topic, articles, null, topicHistory, langCode, recentEvents)
       );
