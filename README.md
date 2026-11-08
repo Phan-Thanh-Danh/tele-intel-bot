@@ -133,18 +133,32 @@ Environment variables:
 | `BOT_TOKEN` | Yes | Telegram Bot token from BotFather | `123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ` |
 | `ADMIN_CHAT_ID` | Yes | Telegram user ID authorized to use the bot | `6211306846` |
 | `OPENROUTER_API_KEY` | Yes | API key for OpenRouter models | `sk-or-v1-abcdef123456...` |
-| `LLM_MODEL` | No | Primary OpenRouter model ID (default: `deepseek/deepseek-chat`) | `deepseek/deepseek-chat` |
-| `LLM_FALLBACK_MODEL` | No | Fallback OpenRouter model ID if primary is unavailable | `meta-llama/llama-3.3-70b-instruct:free` |
+| `LLM_MODEL` | Yes | Primary OpenRouter free model ID (must end with `:free`) | `nvidia/nemotron-3-ultra-550b-a55b:free` |
+| `LLM_FALLBACK_MODEL` | Yes | Fallback OpenRouter free model ID (must end with `:free`) | `nvidia/nemotron-3.5-lightning:free` |
 | `LLM_DAILY_LIMIT` | No | Maximum daily LLM requests before pausing non-essential calls (default: `40`) | `40` |
 | `MYSQL_HOST` | Yes | Database host (`mysql` in Docker, `127.0.0.1` locally) | `127.0.0.1` |
-
-> [!IMPORTANT]
-> **OpenRouter Spending Limit Recommendation**:
-> To protect against accidental overages or unauthorized key usage, always set an explicit monthly or daily spending credit limit on your [OpenRouter Account Settings](https://openrouter.ai/settings/limits) (e.g. \$2.00 – \$5.00 limit). When credits run low or the limit is hit, `tele-intel-bot` automatically sends a Telegram alert to the Admin and falls back to raw headline delivery rather than crashing.
 | `MYSQL_PORT` | Yes | Database port | `3307` |
 | `MYSQL_USER` | Yes | MySQL database user | `bot_user` |
 | `MYSQL_PASSWORD` | Yes | MySQL user password | `bot_password` |
 | `MYSQL_DATABASE` | Yes | MySQL database name | `tele_intel_bot` |
+
+> [!IMPORTANT]
+> **Zero-Cost Operation & Free Tier Limits**:
+> - **100% Free Models**: The bot enforces a hard code guard preventing any paid model calls. `LLM_MODEL` and `LLM_FALLBACK_MODEL` must end with `:free`.
+> - **OpenRouter Free Tier Constraints**: Free models operate under rate limits of **20 requests per minute (RPM)** and **50 requests per day (RPD)**.
+> - **Model Availability**: Free community models on OpenRouter may be deprecated or rotated without notice; the system automatically fails over to `LLM_FALLBACK_MODEL` and alerts the Admin.
+> - **Key Limits Setting**: You can set an explicit \$0.00 credit limit on your OpenRouter key at [https://openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) under menu **"API Keys"** -> Click your Key name -> **"Limit"** (Credit limit USD).
+
+### Daily Request Budget & Schedule Capacity
+
+Each digest synthesis is hard-capped at **at most 2 requests in total** (1 initial request + at most 1 retry for transient/JSON correction):
+
+| Active Topics ($N$) | Scheduled Shifts ($S$) | Nominal Requests / Day | Worst-Case Max (with Retries) | Daily Limit Margin (`LLM_DAILY_LIMIT=40`) |
+| :--- | :--- | :--- | :--- | :--- |
+| 2 topics | 3 shifts (07:00, 12:00, 19:00) | **6 calls** | 12 calls | 28 calls remaining for `/instant` |
+| 3 topics | 3 shifts (07:00, 12:00, 19:00) | **9 calls** | 18 calls | 22 calls remaining for `/instant` |
+| 5 topics | 3 shifts (07:00, 12:00, 19:00) | **15 calls** | 30 calls | 10 calls remaining for `/instant` |
+| 5 topics | 4 shifts (07:00, 12:00, 17:00, 21:00) | **20 calls** | 40 calls | Reaches daily cap in worst-case |
 
 ### Running the Application
 

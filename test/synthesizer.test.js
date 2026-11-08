@@ -7,7 +7,7 @@ const {
   getModelsList,
   synthesizeArticles
 } = require("../lib/synthesizer");
-const { parseRecentEventsFromRows } = require("../lib/db_operations");
+const { parseRecentEventsFromRows, formatVietnamDate } = require("../lib/db_operations");
 
 test("synthesizer: buildPrompt formats article list and target language instruction", () => {
   const articles = [
@@ -210,4 +210,38 @@ test("synthesizer: validateAndSanitizeDigest discards invalid events missing tit
   assert.strictEqual(validated.events[1].title, "Valid Title 2");
   assert.deepStrictEqual(validated.events[1].key_highlights, ["Single string highlight"]);
   assert.strictEqual(validated.events[0].sources[0].url, "https://example.com/1");
+});
+
+test("Phase 5.1: formatVietnamDate prevents timezone shift on DATE values", () => {
+  // Case 1: mysql2 creates DATE as UTC midnight
+  const utcDate = new Date("2026-11-08T00:00:00.000Z");
+  assert.strictEqual(formatVietnamDate(utcDate), "2026-11-08");
+
+  // Case 2: Direct string from mysql2 (when dateStrings enabled)
+  assert.strictEqual(formatVietnamDate("2026-11-08"), "2026-11-08");
+
+  // Case 3: Leap day / year end boundary
+  const yearEndDate = new Date("2026-12-31T00:00:00.000Z");
+  assert.strictEqual(formatVietnamDate(yearEndDate), "2026-12-31");
+  const newYearDate = new Date("2027-01-01T00:00:00.000Z");
+  assert.strictEqual(formatVietnamDate(newYearDate), "2027-01-01");
+});
+
+test("Phase 5.1: parseRecentEventsFromRows respects increased limit of up to 12 events", () => {
+  const eventsList = [];
+  for (let i = 1; i <= 15; i++) {
+    eventsList.push({ title: `Historical Event #${i}` });
+  }
+
+  const rows = [
+    {
+      delivery_date: "2026-11-08",
+      summary_json: JSON.stringify({ events: eventsList })
+    }
+  ];
+
+  const extracted = parseRecentEventsFromRows(rows, 12);
+  assert.strictEqual(extracted.length, 12);
+  assert.strictEqual(extracted[0].title, "Historical Event #1");
+  assert.strictEqual(extracted[11].title, "Historical Event #12");
 });

@@ -46,6 +46,26 @@ for (const envKey of REQUIRED_ENVIRONMENT_VARIABLES) {
   }
 }
 
+// Zero-Cost Startup Guard: Bắt buộc LLM_MODEL và LLM_FALLBACK_MODEL phải kết thúc bằng ":free"
+const primaryModel = (process.env.LLM_MODEL || "").trim();
+const fallbackModel = (process.env.LLM_FALLBACK_MODEL || "").trim();
+
+if (!primaryModel || !primaryModel.endsWith(":free")) {
+  console.error(
+    `[Fatal Startup Error] LLM_MODEL ("${primaryModel || "MISSING"}") không hợp lệ. ` +
+    `Bot được cấu hình ở chế độ 100% không phát sinh chi phí. Bắt buộc model phải kết thúc bằng ":free".`
+  );
+  process.exit(1);
+}
+
+if (!fallbackModel || !fallbackModel.endsWith(":free")) {
+  console.error(
+    `[Fatal Startup Error] LLM_FALLBACK_MODEL ("${fallbackModel || "MISSING"}") không hợp lệ. ` +
+    `Bắt buộc model dự phòng phải kết thúc bằng ":free".`
+  );
+  process.exit(1);
+}
+
 // ============================================================================
 // 2. Vietnam Timezone Utilities (Asia/Ho_Chi_Minh - UTC+7)
 // ============================================================================
@@ -174,8 +194,8 @@ async function executeSynthesizeJob(bot, adminChatId) {
       try {
         const articles = await getArticlesForTopicSince(sub.topic, sub.last_delivered_at, 30);
         const topicHistory = await getTopicHistory(sub.topic, 10);
-        // Phase 5.1: Lấy các sự kiện gần nhất đã gửi của topic để chống lặp tin
-        const recentEvents = await getRecentSentEvents(sub.topic, 5);
+        // Phase 5.1: Lấy các sự kiện gần nhất đã gửi của topic để chống lặp tin (tối đa 12 sự kiện)
+        const recentEvents = await getRecentSentEvents(sub.topic, 12);
         const summary = await synthesizeArticles(
           sub.topic,
           articles,
