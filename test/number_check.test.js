@@ -16,7 +16,11 @@ const {
   verifyEventNumbers,
   extractNumbers,
   cleanText,
-  parseCandidateNumbers
+  parseCandidateNumbers,
+  roundHalfUp,
+  areUnitKindsCompatible,
+  checkDirectMatch,
+  checkDerivedMatch
 } = require("../lib/number_check");
 const { formatEventBlock, escapeHtml } = require("../lib/chunker");
 
@@ -451,4 +455,254 @@ test("number_check 22: regression check for VinFast (12 GWh, 10.000 đơn) and V
   const verified = checkDigestNumbers(digest, realArticles, recentEvents);
   assert.equal(verified.events[0].number_check.not_found.length, 0, "VinFast real numbers (12 GWh, 10.000, 5 GWh) must all match");
   assert.equal(verified.events[1].number_check.not_found.length, 0, "Viettel 5G identifier must be skipped and not flagged");
+});
+
+// -----------------------------------------------------------------------------
+// Test 23: Precision rounding & near-miss rejection/acceptance (Sub-item A.3)
+// -----------------------------------------------------------------------------
+test("number_check 23: precision rounding rejects near misses and accepts valid precision matches", () => {
+  // --- REJECTIONS ---
+  // 1. Model "3,3 tỷ" vs Source 3.18 billion -> REJECT
+  const src318 = extractNumbers("Đầu tư 3.18 tỷ USD.", "src").extracted;
+  const mod33 = extractNumbers("Đầu tư 3,3 tỷ USD.", "mod").extracted[0];
+  assert.equal(checkDirectMatch(mod33, src318).match, false, "3.3 vs 3.18 must be REJECTED");
+
+  // 2. Model "4 tỷ" vs Source 3.18 billion -> REJECT
+  const mod4 = extractNumbers("Đầu tư 4 tỷ USD.", "mod").extracted[0];
+  assert.equal(checkDirectMatch(mod4, src318).match, false, "4 vs 3.18 must be REJECTED");
+
+  // 3. Model "5 tỷ" vs Source 3.18 billion -> REJECT
+  const mod5 = extractNumbers("Đầu tư 5 tỷ USD.", "mod").extracted[0];
+  assert.equal(checkDirectMatch(mod5, src318).match, false, "5 vs 3.18 must be REJECTED");
+
+  // 4. Model "12.5 GWh" vs Source 12 GWh -> REJECT
+  const src12 = extractNumbers("Công suất 12 GWh.", "src").extracted;
+  const mod125 = extractNumbers("Công suất 12.5 GWh.", "mod").extracted[0];
+  assert.equal(checkDirectMatch(mod125, src12).match, false, "12.5 GWh vs 12 GWh must be REJECTED");
+
+  // 5. Model "11%" vs Source 10.6% -> REJECT (percentage near-miss)
+  const src106 = extractNumbers("Tăng trưởng 10.6%.", "src").extracted;
+  const mod11 = extractNumbers("Tăng trưởng 11%.", "mod").extracted[0];
+  assert.equal(checkDirectMatch(mod11, src106).match, false, "11% vs 10.6% must be REJECTED");
+
+  // 6. Derived: 9 vs (12 - 5) -> REJECT
+  const srcPair = extractNumbers("Giai đoạn 1 là 5 GWh, giai đoạn 2 là 12 GWh.", "src").extracted;
+  const modDeriv9 = extractNumbers("Tăng thêm 9 GWh.", "mod").extracted[0];
+  assert.equal(checkDerivedMatch(modDeriv9, srcPair).derived, false, "Derived 9 vs 12-5 must be REJECTED");
+
+  // 7. Derived: 7.4 vs (12 - 5 = 7) -> REJECT
+  const modDeriv74 = extractNumbers("Tăng thêm 7.4 GWh.", "mod").extracted[0];
+  assert.equal(checkDerivedMatch(modDeriv74, srcPair).derived, false, "Derived 7.4 vs 12-5 must be REJECTED");
+
+  // --- ACCEPTANCES ---
+  // 8. Model "3,2 tỷ" vs Source 3.18 billion -> ACCEPT (3.18 rounds half-up to 3.2 at D=1)
+  const mod32 = extractNumbers("Đầu tư 3,2 tỷ USD.", "mod").extracted[0];
+  assert.equal(checkDirectMatch(mod32, src318).match, true, "3.2 vs 3.18 must be ACCEPTED");
+
+  // 9. Model "3 tỷ" vs Source 3.18 billion (written as integer D=0) -> ACCEPT (3.18 rounds half-up to 3)
+  const mod3 = extractNumbers("Đầu tư 3 tỷ USD.", "mod").extracted[0];
+  assert.equal(checkDirectMatch(mod3, src318).match, true, "3 (integer written) vs 3.18 must be ACCEPTED");
+
+  // 10. Model "10.6%" vs Source 10.6% -> ACCEPT
+  const mod106 = extractNumbers("Tăng trưởng 10.6%.", "mod").extracted[0];
+  assert.equal(checkDirectMatch(mod106, src106).match, true, "10.6% vs 10.6% must be ACCEPTED");
+
+  // 11. Derived: 7 vs (12 - 5 = 7) -> ACCEPT
+  const modDeriv7 = extractNumbers("Tăng thêm 7 GWh.", "mod").extracted[0];
+  assert.equal(checkDerivedMatch(modDeriv7, srcPair).derived, true, "Derived 7 vs 12-5 must be ACCEPTED");
+});
+
+// -----------------------------------------------------------------------------
+// Test 24: Noun compatibility matrix and tests (Sub-item A.5)
+// -----------------------------------------------------------------------------
+test("number_check 24: noun compatibility matrix and unit kind conflict checks", () => {
+  // Print compatibility matrix between key count kinds
+  const testKinds = ["GENERIC_COUNT", "COUNT_ORDER", "COUNT_VEHICLE", "COUNT_TICKET", "COUNT_SEAT", "COUNT_PERSON"];
+  console.log("\n--- NOUN COMPATIBILITY MATRIX ---");
+  const header = "               " + testKinds.map(k => k.replace("COUNT_", "").padEnd(10)).join(" ");
+  console.log(header);
+  for (const k1 of testKinds) {
+    const row = k1.replace("COUNT_", "").padEnd(15) + testKinds.map(k2 => (areUnitKindsCompatible(k1, k2) ? "MATCH" : "DIFF ").padEnd(10)).join(" ");
+    console.log(row);
+  }
+  console.log("---------------------------------\n");
+
+  // Case 1: Source "10.000 xe" vs Model "10.000 đơn" -> must be FLAGGED
+  const srcXe = [makeArticle("Đã phân phối 10.000 xe ra thị trường.")];
+  const evtDon = makeEvent({
+    core_verdict: "Doanh nghiệp ghi nhận 10.000 đơn mới.",
+    source_indices: [1]
+  });
+  const res1 = verifyEventNumbers(evtDon, srcXe, []);
+  assert.equal(res1.number_check.not_found.length, 1, "source 10.000 xe vs model 10.000 đơn must be FLAGGED");
+
+  // Case 2: Source "10.000 đơn hàng" vs Model "10.000 đơn" -> ACCEPTED
+  const srcDonHang = [makeArticle("Hệ thống xử lý 10.000 đơn hàng.")];
+  const res2 = verifyEventNumbers(evtDon, srcDonHang, []);
+  assert.equal(res2.number_check.not_found.length, 0, "source 10.000 đơn hàng vs model 10.000 đơn must be ACCEPTED");
+
+  // Case 3: Source "10.000" (no noun) vs Model "10.000 đơn" -> ACCEPTED
+  const srcNoNoun = [makeArticle("Số lượng đạt 10.000 trong đợt đầu.")];
+  const res3 = verifyEventNumbers(evtDon, srcNoNoun, []);
+  assert.equal(res3.number_check.not_found.length, 0, "source 10.000 (no noun) vs model 10.000 đơn must be ACCEPTED");
+});
+
+// -----------------------------------------------------------------------------
+// Test 25: Randomized accidental-match test with 2000 numbers (Sub-item A.4)
+// -----------------------------------------------------------------------------
+test("number_check 25: randomized accidental-match false-accept rate is below 2%", () => {
+  const sourceSnippets = [
+    "Dự án A có vốn 12 tỷ đồng.",
+    "Dự án B có vốn 45,5 tỷ đồng.",
+    "Dự án C quy mô 100 tỷ đồng.",
+    "Dự án D đầu tư 250 tỷ đồng.",
+    "Dự án E giải ngân 500 tỷ đồng.",
+    "Dự án F đạt 1.200 tỷ đồng.",
+    "Dự án G có ngân sách 3.500 tỷ đồng.",
+    "Dự án H đạt mốc 7.300 tỷ đồng.",
+    "Dự án I trị giá 15.000 tỷ đồng.",
+    "Dự án K cán mốc 50.000 tỷ đồng."
+  ];
+
+  const sourceNumbers = [];
+  for (const s of sourceSnippets) {
+    sourceNumbers.push(...extractNumbers(s, "source").extracted);
+  }
+
+  // Pre-calculate all source and derivable values to ensure generated numbers are not in source
+  const excludedValues = new Set();
+  for (const sn of sourceNumbers) {
+    for (const c of sn.candidates) excludedValues.add(c);
+  }
+  for (let i = 0; i < sourceNumbers.length; i++) {
+    for (let j = i + 1; j < sourceNumbers.length; j++) {
+      const a = sourceNumbers[i].candidates[0];
+      const b = sourceNumbers[j].candidates[0];
+      excludedValues.add(a + b);
+      excludedValues.add(Math.abs(a - b));
+      if (b > 0) excludedValues.add(a / b);
+      if (a > 0) excludedValues.add(b / a);
+      if (a > 0) excludedValues.add((Math.abs(a - b) / a) * 100);
+      if (b > 0) excludedValues.add((Math.abs(a - b) / b) * 100);
+    }
+  }
+
+  // Seeded reproducible pseudo-random generator (LCG)
+  let seed = 20261110;
+  function lcg() {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  }
+
+  let testedCount = 0;
+  let falseAccepts = 0;
+  const decimalsOptions = [0, 1, 2];
+
+  while (testedCount < 2000) {
+    const dec = decimalsOptions[Math.floor(lcg() * decimalsOptions.length)];
+    const rawVal = (lcg() * 59999 + 1).toFixed(dec);
+    const num = parseFloat(rawVal);
+    const canonical = num * 1e9;
+
+    let isExcluded = false;
+    for (const ex of excludedValues) {
+      if (Math.abs(canonical - ex) < 1e-4) {
+        isExcluded = true;
+        break;
+      }
+    }
+    if (isExcluded) continue;
+
+    const targetText = rawVal.replace(".", ",") + " tỷ đồng";
+    const target = extractNumbers(targetText, "target").extracted[0];
+    if (!target) continue;
+
+    const direct = checkDirectMatch(target, sourceNumbers);
+    const derived = checkDerivedMatch(target, sourceNumbers);
+
+    if (direct.match || derived.derived) {
+      falseAccepts++;
+    }
+    testedCount++;
+  }
+
+  const falseAcceptRate = (falseAccepts / 2000) * 100;
+  console.log(`\nAccidental-match test: ${falseAccepts} / 2000 false accepts (${falseAcceptRate.toFixed(3)}%)`);
+  assert.ok(falseAcceptRate < 2.0, `False accept rate (${falseAcceptRate.toFixed(3)}%) must be strictly below 2%`);
+});
+
+// -----------------------------------------------------------------------------
+// Test 26: Performance & timing on 20,000-char inputs (Sub-item D.1)
+// -----------------------------------------------------------------------------
+test("number_check 26: 20000-char strings finish within 200 ms each", () => {
+  // Input 1: 20,000-character string of repeated "1.1.1."
+  const pattern20k = "1.1.1.".repeat(3334).slice(0, 20000);
+  const t0 = performance.now();
+  extractNumbers(pattern20k, "bench_pattern");
+  const elapsed1 = performance.now() - t0;
+  console.log(`\nTiming Test 1 (20k repeated '1.1.1.'): ${elapsed1.toFixed(2)} ms`);
+  assert.ok(elapsed1 < 200, `Repeated pattern timing (${elapsed1.toFixed(2)} ms) must be < 200 ms`);
+
+  // Input 2: 20,000-character string made of digits and separators
+  const chars = "0123456789., -%  ";
+  let randomSepStr = "";
+  let s = 12345;
+  for (let i = 0; i < 20000; i++) {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    randomSepStr += chars[s % chars.length];
+  }
+  const t1 = performance.now();
+  extractNumbers(randomSepStr, "bench_separators");
+  const elapsed2 = performance.now() - t1;
+  console.log(`Timing Test 2 (20k digits and separators): ${elapsed2.toFixed(2)} ms`);
+  assert.ok(elapsed2 < 200, `Separators timing (${elapsed2.toFixed(2)} ms) must be < 200 ms`);
+});
+
+// -----------------------------------------------------------------------------
+// Test 27: Fuzz inputs list and never-throws robustness (Sub-item D.2)
+// -----------------------------------------------------------------------------
+test("number_check 27: full list of fuzz inputs handled cleanly without throwing", () => {
+  const fuzzInputs = [
+    null,
+    undefined,
+    "",
+    "   ",
+    {},
+    [],
+    12345,
+    true,
+    false,
+    NaN,
+    Infinity,
+    -Infinity,
+    ".....,,,,,-----",
+    "--- ARTICLE [NaN] ---",
+    "<script>alert('xss')</script>",
+    "🔥🚀 100 triệu USD 🤖📊",
+    "\u0000\u0007\u001b\n\r\t",
+    "$$$$%%%%€€€€",
+    "Số liệu: 1,2,3,4,5,6,7,8,9,0",
+    "9".repeat(5000),
+    "1.000.000.000.000.000.000.000.000",
+    "1,000,000,000,000,000,000,000,000",
+    "0/0",
+    "-0.00000001%",
+    "Special: \uFFFF\uD83D\uDE00\uFEFF",
+    { overview: null, events: null },
+    { overview: 12345, events: "not an array" },
+    { overview: "Valid", events: [null, undefined, 42, "string", {}, { title: null }] }
+  ];
+
+  console.log("\n--- FUZZ INPUTS LIST (" + fuzzInputs.length + " cases) ---");
+  fuzzInputs.forEach((inp, idx) => {
+    let display = typeof inp === "string" && inp.length > 30 ? inp.slice(0, 30) + "..." : JSON.stringify(inp);
+    console.log(`Fuzz [${idx + 1}/${fuzzInputs.length}]: ${display}`);
+  });
+  console.log("----------------------------------------------------------\n");
+
+  for (const inp of fuzzInputs) {
+    assert.doesNotThrow(() => cleanText(inp));
+    assert.doesNotThrow(() => extractNumbers(inp, "fuzz"));
+    assert.doesNotThrow(() => checkDigestNumbers(inp, [], []));
+  }
 });

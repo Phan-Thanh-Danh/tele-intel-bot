@@ -11,7 +11,7 @@ const {
 
 test("DATE handling: specific_date is returned as string YYYY-MM-DD from MySQL", async (t) => {
   const testChatId = 988811001;
-  const testTopic = "test_specific_date_" + Date.now();
+  const testTopic = "__test___specific_date_" + Date.now();
   const knownDate = "2026-11-08";
   let subId = null;
 
@@ -45,14 +45,14 @@ test("DATE handling: specific_date is returned as string YYYY-MM-DD from MySQL",
     assert.strictEqual(isToday, true);
   } finally {
     if (subId) {
-      await pool.query("DELETE FROM subscriptions WHERE id = ?", [subId]).catch(() => {});
+      await pool.query("DELETE FROM subscriptions WHERE id = ? AND topic LIKE '__test__%'", [subId]).catch(() => {});
     }
   }
 });
 
 test("DATE handling: shift_digests.delivery_date works cleanly with queries and formatting", async (t) => {
   const testChatId = 988811002;
-  const testTopic = "test_digest_date_" + Date.now();
+  const testTopic = "__test___digest_date_" + Date.now();
   const knownDate = "2026-11-08";
   let subId = null;
   let digestId = null;
@@ -93,10 +93,10 @@ test("DATE handling: shift_digests.delivery_date works cleanly with queries and 
     assert.strictEqual(rawRows[0].delivery_date, knownDate);
   } finally {
     if (digestId) {
-      await pool.query("DELETE FROM shift_digests WHERE id = ?", [digestId]).catch(() => {});
+      await pool.query("DELETE FROM shift_digests WHERE id = ? AND topic LIKE '__test__%'", [digestId]).catch(() => {});
     }
     if (subId) {
-      await pool.query("DELETE FROM subscriptions WHERE id = ?", [subId]).catch(() => {});
+      await pool.query("DELETE FROM subscriptions WHERE id = ? AND topic LIKE '__test__%'", [subId]).catch(() => {});
     }
   }
 });

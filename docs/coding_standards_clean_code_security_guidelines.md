@@ -139,7 +139,7 @@ Every module and function must execute exactly one unambiguous responsibility:
     } catch (err) {
       console.error("[Synthesis Failure]:", err);
     } finally {
-      isSynthesizing = false; // Guaranteed unlock regardless of success or error
+      isSynthesizing = false; // Deterministic unlock regardless of success or error
     }
   }
   ```

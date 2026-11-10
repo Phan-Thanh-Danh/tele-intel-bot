@@ -79,4 +79,4 @@ The engine utilizes **OpenRouter** with automatic model cascading and retry mech
 2. **Tier 2 Fallback:** `nvidia/nemotron-3.5-lightning:free`
 3. **Tier 3 Fallback:** `nvidia/nemotron-3-ultra-550b-a55b:free`
 4. **Tier 4 Fallback:** `google/gemma-4-31b-it:free`
-5. **Emergency Raw Fallback (`buildRawFallbackJson`):** If all upstream models are unavailable, the top raw articles are formatted directly into clean Telegram HTML pages with direct links, preserving 100% broadcast continuity.
+5. **Emergency Raw Fallback (`buildRawFallbackJson`):** If all upstream models are unavailable, the top raw articles are formatted directly into clean Telegram HTML pages with direct links, preserving continuous broadcast availability.

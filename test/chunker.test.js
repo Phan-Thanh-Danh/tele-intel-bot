@@ -28,7 +28,7 @@ test("chunker: formatEventBlock renders multi-source badge when >= 2 sources pre
     priority: "HIGH",
     title: "Breakthrough Discovery",
     core_verdict: "Scientists found clean energy solution.",
-    key_highlights: ["100% efficient", "Zero emission"],
+    key_highlights: ["High efficiency", "Zero emission"],
     impact: "Revolutionizes modern grid.",
     sources: [
       { name: "Reuters", url: "https://reuters.com/1" },

@@ -239,7 +239,7 @@ async function executeSynthesizeJob(bot, adminChatId) {
   } catch (error) {
     console.error("[Synthesis Job Global Exception]:", error);
   } finally {
-    isSynthesizing = false; // Guaranteed unlock
+    isSynthesizing = false; // Ensure synthesis lock is released
   }
 }
 
